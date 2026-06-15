@@ -1,0 +1,119 @@
+name: Build JJ Launcher ROMs
+
+on:
+  push:
+    branches: ["main", "master"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      latest_tag: ${{ steps.set-matrix.outputs.latest_tag }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Discover launcher releases
+        id: set-matrix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ./scripts/list-launcher-releases.sh > releases.json
+          MATRIX="$(python3 -c 'import json; items=json.load(open("releases.json")); print(json.dumps([{"tag": i["tag"], "name": i["name"], "apk_name": i["apk_name"]} for i in items]))')"
+          LATEST_TAG="$(python3 -c 'import json; items=json.load(open("releases.json")); print(items[-1]["tag"] if items else "")')"
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+          echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: launcher-release-metadata
+          path: releases.json
+          retention-days: 7
+
+  build:
+    needs: discover
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        launcher: ${{ fromJson(needs.discover.outputs.matrix) }}
+        type: [a, b]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y unzip zip e2fsprogs curl
+
+      - name: Build ROM
+        run: |
+          TAG="${{ matrix.launcher.tag }}"
+          TYPE="${{ matrix.type }}"
+          OUT_DIR="$GITHUB_WORKSPACE/dist/${TAG}"
+          mkdir -p "$OUT_DIR"
+          if [ "$TYPE" = "a" ]; then
+            OUT_FILE="$OUT_DIR/rom.zip"
+          else
+            OUT_FILE="$OUT_DIR/rom_type_b.zip"
+          fi
+          ./scripts/build-rom.sh "$TYPE" --launcher-tag "$TAG" "$OUT_FILE"
+
+      - name: Upload ROM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rom-${{ matrix.launcher.tag }}-type-${{ matrix.type }}
+          path: dist/${{ matrix.launcher.tag }}/
+          retention-days: 14
+
+  release:
+    needs: [discover, build]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        launcher: ${{ fromJson(needs.discover.outputs.matrix) }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download release metadata
+        uses: actions/download-artifact@v4
+        with:
+          name: launcher-release-metadata
+
+      - name: Download Type A ROM
+        uses: actions/download-artifact@v4
+        with:
+          name: rom-${{ matrix.launcher.tag }}-type-a
+          path: dist/type-a
+
+      - name: Download Type B ROM
+        uses: actions/download-artifact@v4
+        with:
+          name: rom-${{ matrix.launcher.tag }}-type-b
+          path: dist/type-b
+
+      - name: Prepare release notes
+        run: |
+          TAG="${{ matrix.launcher.tag }}"
+          ./scripts/format-release-notes.sh releases.json "$TAG" > RELEASE_NOTES.md
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: launcher-${{ matrix.launcher.tag }}
+          name: JJ Launcher ROM ${{ matrix.launcher.tag }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist/type-a/rom.zip
+            dist/type-b/rom_type_b.zip
+          fail_on_unmatched_files: true
+          make_latest: ${{ matrix.launcher.tag == needs.discover.outputs.latest_tag }}
+          overwrite_files: true
