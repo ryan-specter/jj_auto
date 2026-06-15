@@ -84,17 +84,25 @@ python ../mtk.py w logo,uboot,bootimg,recovery,android,usrdata \
 
 ## CI builds
 
-On each push to `main`/`master`, GitHub Actions:
+CI runs when:
 
-1. Discovers every `app-release*.apk` release from `ismileblue/y1_launcher`
-2. Builds Type A and Type B ROMs for each launcher version
-3. Publishes one GitHub Release per launcher version with imported upstream changelog
+- A **new release** is published on [ismileblue/y1_launcher](https://github.com/ismileblue/y1_launcher) (polled every 30 minutes)
+- You push changes to `main`/`master` (rebuilds all launcher versions)
+- You trigger the workflow manually from GitHub Actions
+
+Manual runs default to **new releases only**. Enable **Rebuild all launcher versions** to refresh every ROM.
+
+For each build target, GitHub Actions:
+
+1. Builds Type A and Type B ROMs for each launcher version that needs publishing
+2. Publishes one GitHub Release per launcher version with upstream changelog copied verbatim
 
 ## Repository layout
 
 ```
 .github/workflows/build-roms.yml   CI pipeline
 scripts/build-rom.sh               ROM repackaging + audit
+scripts/prepare-build-matrix.sh     Upstream vs published release check
 scripts/list-launcher-releases.sh  Upstream release discovery
 scripts/format-release-notes.sh    Release notes formatter
 scripts/Stock.kl                   Stock Y1 keymap

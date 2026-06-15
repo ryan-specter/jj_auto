@@ -4,31 +4,45 @@ on:
   push:
     branches: ["main", "master"]
   workflow_dispatch:
+    inputs:
+      rebuild_all:
+        description: Rebuild all launcher versions (not just new upstream releases)
+        type: boolean
+        default: false
+  schedule:
+    # Poll for new ismileblue/y1_launcher releases every 30 minutes.
+    - cron: "*/30 * * * *"
+  repository_dispatch:
+    types: [y1_launcher_release]
 
 permissions:
   contents: write
 
 jobs:
-  discover:
+  check-upstream:
     runs-on: ubuntu-latest
     outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-      latest_tag: ${{ steps.set-matrix.outputs.latest_tag }}
+      has_new: ${{ steps.prepare.outputs.has_new }}
+      matrix: ${{ steps.prepare.outputs.matrix }}
+      latest_tag: ${{ steps.prepare.outputs.latest_tag }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Discover launcher releases
-        id: set-matrix
+      - name: Determine build targets
+        id: prepare
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ./scripts/list-launcher-releases.sh > releases.json
-          MATRIX="$(python3 -c 'import json; items=json.load(open("releases.json")); print(json.dumps([{"tag": i["tag"], "name": i["name"], "apk_name": i["apk_name"], "apk_url": i["apk_url"]} for i in items]))')"
-          LATEST_TAG="$(python3 -c 'import json; items=json.load(open("releases.json")); print(items[-1]["tag"] if items else "")')"
-          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
-          echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
+          MODE="new_only"
+          if [ "${{ github.event_name }}" = "push" ]; then
+            MODE="all"
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ] && [ "${{ inputs.rebuild_all }}" = "true" ]; then
+            MODE="all"
+          fi
+          ./scripts/prepare-build-matrix.sh "$MODE"
 
       - name: Upload release metadata
+        if: steps.prepare.outputs.has_new == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: launcher-release-metadata
@@ -36,12 +50,13 @@ jobs:
           retention-days: 7
 
   build:
-    needs: discover
+    needs: check-upstream
+    if: needs.check-upstream.outputs.has_new == 'true'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        launcher: ${{ fromJson(needs.discover.outputs.matrix) }}
+        launcher: ${{ fromJson(needs.check-upstream.outputs.matrix) }}
         type: [a, b]
 
     steps:
@@ -74,13 +89,13 @@ jobs:
           retention-days: 14
 
   release:
-    needs: [discover, build]
-    if: ${{ !cancelled() && needs.discover.result == 'success' }}
+    needs: [check-upstream, build]
+    if: ${{ !cancelled() && needs.check-upstream.outputs.has_new == 'true' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        launcher: ${{ fromJson(needs.discover.outputs.matrix) }}
+        launcher: ${{ fromJson(needs.check-upstream.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -132,5 +147,5 @@ jobs:
             dist/type-a/rom.zip
             dist/type-b/rom_type_b.zip
           fail_on_unmatched_files: true
-          make_latest: ${{ matrix.launcher.tag == needs.discover.outputs.latest_tag }}
+          make_latest: ${{ matrix.launcher.tag == needs.check-upstream.outputs.latest_tag }}
           overwrite_files: true
