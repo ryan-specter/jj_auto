@@ -6,12 +6,12 @@ Flashable firmware images that boot directly into [JJ Launcher (MO-ON)](https://
 
 Each [GitHub Release](https://github.com/ryan-specter/jj_auto/releases) matches an upstream JJ Launcher version (`launcher-v0.5`, `launcher-v0.3`, etc.) and includes:
 
-- `rom.zip` — Type A (original Y1 stock firmware lineage)
-- `rom_type_b.zip` — Type B (Y1 devices that shipped with stock firmware 3.0.7)
+- `rom.zip` — Type A (devices that shipped with stock firmware **2.0.0 or later**)
+- `rom_type_b.zip` — Type B (devices that shipped with stock firmware **prior to 2.0.0**)
 
 Release notes on each ROM build import the changelog from the matching [ismileblue/y1_launcher](https://github.com/ismileblue/y1_launcher/releases) release so you can pick the launcher version you want and read its original notes before flashing.
 
-If unsure which type you need, try Type A first. Use Type B if Type A does not boot correctly on your device.
+If unsure which type you need, use Type A for firmware 2.0.0+. Use Type B only if your device shipped with stock firmware earlier than 2.0.0.
 
 ## What this ROM does
 

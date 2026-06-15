@@ -17,7 +17,7 @@ usage() {
     cat >&2 <<EOF
 usage: $0 <a|b> [--launcher-tag TAG] [--launcher-apk-url URL] [output.zip]
 
-  a|b                   Type A or Type B base firmware
+  a|b                   Type A (firmware 2.0.0+) or Type B (firmware before 2.0.0)
   --launcher-tag        y1_launcher release tag (default: latest)
   --launcher-apk-url    Direct APK download URL (skips HTML lookup)
   output.zip            Output archive path
