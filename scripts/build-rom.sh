@@ -153,9 +153,19 @@ audit_rom_contents() {
         fi
     done
 
-    if find "$sys_mount/app" "$sys_mount/priv-app" \( -iname '*innioasis*' -o -iname '*y1*.apk' \) 2>/dev/null | grep -q .; then
+    if find "$sys_mount/app" "$sys_mount/priv-app" -iname '*innioasis*' 2>/dev/null | grep -q .; then
         echo "audit fail: stock launcher APK still present under /system/app" >&2
-        find "$sys_mount/app" "$sys_mount/priv-app" \( -iname '*innioasis*' -o -iname '*y1*.apk' \) 2>/dev/null >&2 || true
+        find "$sys_mount/app" "$sys_mount/priv-app" -iname '*innioasis*' 2>/dev/null >&2 || true
+        errors=$((errors + 1))
+    fi
+
+    if [ ! -f "$sys_mount/app/com.themoon.y1.apk" ]; then
+        echo "audit fail: com.themoon.y1.apk missing from /system/app" >&2
+        errors=$((errors + 1))
+    fi
+
+    if [ -f "$sys_mount/etc/init.d/99Y1ButtonScript" ] || [ -f "$sys_mount/etc/init.d/99Y1LauncherInit.sh" ]; then
+        echo "audit fail: legacy init.d scripts still present" >&2
         errors=$((errors + 1))
     fi
 
@@ -172,16 +182,8 @@ audit_rom_contents() {
         errors=$((errors + 1))
     fi
 
-    if [ ! -f "$sys_mount/etc/init.d/99Y1LauncherInit.sh" ]; then
-        echo "audit fail: 99Y1LauncherInit.sh missing" >&2
-        errors=$((errors + 1))
-    elif [ ! -x "$sys_mount/etc/init.d/99Y1LauncherInit.sh" ]; then
-        echo "audit fail: 99Y1LauncherInit.sh is not executable" >&2
-        errors=$((errors + 1))
-    fi
-
-    if [ ! -f "$user_mount/jj_launcher.apk" ]; then
-        echo "audit fail: /data/jj_launcher.apk missing" >&2
+    if [ -f "$user_mount/jj_launcher.apk" ]; then
+        echo "audit fail: legacy /data/jj_launcher.apk still present" >&2
         errors=$((errors + 1))
     fi
 
@@ -234,33 +236,30 @@ while IFS= read -r apk; do
     [ -n "$apk" ] || continue
     echo "  removing $apk"
     sudo rm -f "$apk"
-done < <(find "$MOUNT_SYS/app" "$MOUNT_SYS/priv-app" \( -iname '*innioasis*' -o -iname '*y1*.apk' \) 2>/dev/null || true)
+done < <(find "$MOUNT_SYS/app" "$MOUNT_SYS/priv-app" -iname '*innioasis*' 2>/dev/null || true)
 
 sudo rm -f "$MOUNT_SYS/app/org.rockbox.apk"
 sudo rm -f "$MOUNT_SYS/lib/librockbox.so"
+sudo rm -f "$MOUNT_SYS/etc/init.d/99Y1ButtonScript"
+sudo rm -f "$MOUNT_SYS/etc/init.d/99Y1LauncherInit.sh"
+sudo rm -f "$MOUNT_SYS/etc/install-recovery.sh"
 
-sudo mkdir -p "$MOUNT_SYS/usr/keylayout" "$MOUNT_SYS/etc/init.d"
+sudo mkdir -p "$MOUNT_SYS/app" "$MOUNT_SYS/usr/keylayout"
+sudo cp "$LAUNCHER_APK" "$MOUNT_SYS/app/com.themoon.y1.apk"
+sudo chmod 644 "$MOUNT_SYS/app/com.themoon.y1.apk"
+sudo chown root:root "$MOUNT_SYS/app/com.themoon.y1.apk"
 sudo cp "$SCRIPT_DIR/Stock.kl" "$MOUNT_SYS/usr/keylayout/Stock.kl"
 sudo cp "$SCRIPT_DIR/Stock.kl" "$MOUNT_SYS/usr/keylayout/Generic.kl"
 sudo chmod 644 "$MOUNT_SYS/usr/keylayout/Stock.kl" "$MOUNT_SYS/usr/keylayout/Generic.kl"
 sudo chown root:root "$MOUNT_SYS/usr/keylayout/Stock.kl" "$MOUNT_SYS/usr/keylayout/Generic.kl"
 
-sudo cp "$SCRIPT_DIR/install-recovery.sh" "$MOUNT_SYS/etc/install-recovery.sh"
-sudo chmod 755 "$MOUNT_SYS/etc/install-recovery.sh"
-sudo chown root:root "$MOUNT_SYS/etc/install-recovery.sh"
-
-sudo cp "$SCRIPT_DIR/99Y1LauncherInit.sh" "$MOUNT_SYS/etc/init.d/99Y1LauncherInit.sh"
-sudo chmod 755 "$MOUNT_SYS/etc/init.d/99Y1LauncherInit.sh"
-sudo chown root:root "$MOUNT_SYS/etc/init.d/99Y1LauncherInit.sh"
-
 echo "==> Patching userdata partition"
 sudo rm -rf "$MOUNT_USER/org.rockbox"
 sudo rm -f "$MOUNT_USER/com.innioasis.y1.apk"
 sudo rm -f "$MOUNT_USER/data/com.innioasis.y1.apk"
+sudo rm -f "$MOUNT_USER/jj_launcher.apk"
 sudo rm -f "$MOUNT_USER/data/initialized"
 sudo rm -f "$MOUNT_USER/data/jj_launcher_initialized"
-sudo cp "$LAUNCHER_APK" "$MOUNT_USER/jj_launcher.apk"
-sudo chmod 644 "$MOUNT_USER/jj_launcher.apk"
 
 audit_rom_contents "$BASE_DIR" "$MOUNT_SYS" "$MOUNT_USER"
 

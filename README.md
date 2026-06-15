@@ -15,13 +15,13 @@ If unsure which type you need, use Type A for firmware 2.0.0+. Use Type B only i
 
 ## What this ROM does
 
-On first boot, an init script:
+The build pipeline preinstalls JJ Launcher (`com.themoon.y1`) as a system app at `/system/app/com.themoon.y1.apk`. It also:
 
-1. Installs the bundled JJ Launcher APK (`com.themoon.y1`) from `/data/jj_launcher.apk`
-2. Disables any remaining stock or Rockbox launcher packages
+1. Removes the stock `com.innioasis.y1` launcher from the system image
+2. Strips legacy Rockbox init scripts that would block boot-time setup
 3. Uses the stock Y1 hardware keymap (`Stock.kl` as `Generic.kl`)
 
-No manual `adb install` or `pm disable` is required after flashing.
+No boot-time `pm install` step and no manual `adb install` / `pm disable` is required after flashing.
 
 **Note:** JJ Launcher's upstream README mentions that full power-off behavior may require Rockbox. This ROM does not include Rockbox.
 
@@ -97,8 +97,6 @@ On each push to `main`/`master`, GitHub Actions:
 scripts/build-rom.sh               ROM repackaging + audit
 scripts/list-launcher-releases.sh  Upstream release discovery
 scripts/format-release-notes.sh    Release notes formatter
-scripts/99Y1LauncherInit.sh        First-boot launcher setup
-scripts/install-recovery.sh        Runs /system/etc/init.d at boot
 scripts/Stock.kl                   Stock Y1 keymap
 ```
 

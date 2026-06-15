@@ -31,6 +31,7 @@ apk_name = match.get("apk_name") or "app-release.apk"
 print(f"# JJ Launcher ROM — {tag}")
 print()
 print("Flashable Innioasis Y1 firmware that boots directly into JJ Launcher.")
+print("JJ Launcher is preinstalled as a system app during the ROM build.")
 print("No Rockbox, no stock launcher, and no post-flash ADB steps required.")
 print()
 print("## Downloads")
