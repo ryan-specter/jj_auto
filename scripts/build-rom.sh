@@ -5,6 +5,7 @@ set -euo pipefail
 
 TYPE=""
 LAUNCHER_TAG=""
+LAUNCHER_APK_URL=""
 OUTPUT=""
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -14,11 +15,12 @@ MOUNT_USER=""
 
 usage() {
     cat >&2 <<EOF
-usage: $0 <a|b> [--launcher-tag TAG] [output.zip]
+usage: $0 <a|b> [--launcher-tag TAG] [--launcher-apk-url URL] [output.zip]
 
-  a|b               Type A or Type B base firmware
-  --launcher-tag    y1_launcher release tag (default: latest)
-  output.zip        Output archive path
+  a|b                   Type A or Type B base firmware
+  --launcher-tag        y1_launcher release tag (default: latest)
+  --launcher-apk-url    Direct APK download URL (skips HTML lookup)
+  output.zip            Output archive path
 EOF
     exit 1
 }
@@ -32,6 +34,11 @@ while [ "$#" -gt 0 ]; do
         --launcher-tag)
             LAUNCHER_TAG="${2:-}"
             [ -n "$LAUNCHER_TAG" ] || usage
+            shift 2
+            ;;
+        --launcher-apk-url)
+            LAUNCHER_APK_URL="${2:-}"
+            [ -n "$LAUNCHER_APK_URL" ] || usage
             shift 2
             ;;
         -h|--help)
@@ -105,7 +112,13 @@ resolve_latest_launcher_tag() {
 download_launcher_apk() {
     local dest="$1"
     local tag="${2:-}"
-    local apk_url
+    local apk_url="${3:-}"
+
+    if [ -n "$apk_url" ]; then
+        echo "Downloading $(basename "$apk_url")"
+        curl -fsSL -o "$dest" "$apk_url"
+        return
+    fi
 
     if [ -z "$tag" ]; then
         tag="$(resolve_latest_launcher_tag)"
@@ -114,7 +127,7 @@ download_launcher_apk() {
     apk_url="$(
         curl -fsSL -A 'jj-launcher-rom-build/1.0' \
             "https://github.com/ismileblue/y1_launcher/releases/expanded_assets/${tag}" \
-        | grep -Eo 'href="/ismileblue/y1_launcher/releases/download/[^"]+app-release[^"]+\.apk"' \
+        | grep -Eo 'href="/ismileblue/y1_launcher/releases/download/[^"]+app-release[^"]*\.apk"' \
         | head -1 \
         | sed 's/^href="//; s/"$//'
     )"
@@ -197,7 +210,10 @@ LAUNCHER_APK="$WORK_DIR/jj_launcher.apk"
 
 mkdir -p "$BASE_DIR" "$MOUNT_SYS" "$MOUNT_USER"
 
-if [ -n "$LAUNCHER_TAG" ]; then
+if [ -n "$LAUNCHER_APK_URL" ]; then
+    echo "==> Downloading JJ Launcher APK from release metadata"
+    download_launcher_apk "$LAUNCHER_APK" "$LAUNCHER_TAG" "$LAUNCHER_APK_URL"
+elif [ -n "$LAUNCHER_TAG" ]; then
     echo "==> Downloading JJ Launcher APK for tag ${LAUNCHER_TAG}"
     download_launcher_apk "$LAUNCHER_APK" "$LAUNCHER_TAG"
 else

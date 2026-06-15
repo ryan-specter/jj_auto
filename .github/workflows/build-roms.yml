@@ -23,7 +23,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           ./scripts/list-launcher-releases.sh > releases.json
-          MATRIX="$(python3 -c 'import json; items=json.load(open("releases.json")); print(json.dumps([{"tag": i["tag"], "name": i["name"], "apk_name": i["apk_name"]} for i in items]))')"
+          MATRIX="$(python3 -c 'import json; items=json.load(open("releases.json")); print(json.dumps([{"tag": i["tag"], "name": i["name"], "apk_name": i["apk_name"], "apk_url": i["apk_url"]} for i in items]))')"
           LATEST_TAG="$(python3 -c 'import json; items=json.load(open("releases.json")); print(items[-1]["tag"] if items else "")')"
           echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
           echo "latest_tag=${LATEST_TAG}" >> "$GITHUB_OUTPUT"
@@ -56,6 +56,7 @@ jobs:
         run: |
           TAG="${{ matrix.launcher.tag }}"
           TYPE="${{ matrix.type }}"
+          APK_URL="${{ matrix.launcher.apk_url }}"
           OUT_DIR="$GITHUB_WORKSPACE/dist/${TAG}"
           mkdir -p "$OUT_DIR"
           if [ "$TYPE" = "a" ]; then
@@ -63,7 +64,7 @@ jobs:
           else
             OUT_FILE="$OUT_DIR/rom_type_b.zip"
           fi
-          ./scripts/build-rom.sh "$TYPE" --launcher-tag "$TAG" "$OUT_FILE"
+          ./scripts/build-rom.sh "$TYPE" --launcher-tag "$TAG" --launcher-apk-url "$APK_URL" "$OUT_FILE"
 
       - name: Upload ROM artifact
         uses: actions/upload-artifact@v4
@@ -74,6 +75,7 @@ jobs:
 
   release:
     needs: [discover, build]
+    if: ${{ !cancelled() && needs.discover.result == 'success' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -90,15 +92,30 @@ jobs:
 
       - name: Download Type A ROM
         uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_type_a
         with:
           name: rom-${{ matrix.launcher.tag }}-type-a
           path: dist/type-a
 
       - name: Download Type B ROM
         uses: actions/download-artifact@v4
+        continue-on-error: true
+        id: download_type_b
         with:
           name: rom-${{ matrix.launcher.tag }}-type-b
           path: dist/type-b
+
+      - name: Verify ROM artifacts exist
+        run: |
+          test -f dist/type-a/rom.zip || {
+            echo "Skipping release for ${{ matrix.launcher.tag }}: Type A ROM artifact missing"
+            exit 1
+          }
+          test -f dist/type-b/rom_type_b.zip || {
+            echo "Skipping release for ${{ matrix.launcher.tag }}: Type B ROM artifact missing"
+            exit 1
+          }
 
       - name: Prepare release notes
         run: |
