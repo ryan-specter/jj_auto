@@ -4893,11 +4893,11 @@ public class MainActivity extends Activity {
                 android.view.View btnCoverFlow = createListButtonWithIcon("\uE3B6", t("Cover Flow"));
 
                 // 리턴된 뷰가 LinearLayout이어도 setOnClickListener는 100% 동일하게 작동합니다!
-                btnCoverFlow.setOnClickListener(v -> { clickFeedback(); buildCoverFlowUI(); });
+                btnCoverFlow.setOnClickListener(v -> { clickFeedback(); lastBrowserFocusText = "FROM_LIBRARY"; buildCoverFlowUI(); });
                 containerBrowserItems.addView(btnCoverFlow);
 
                 android.view.View btnM3uPlaylist = createListButtonWithIcon("\uE05F", t("Playlists"));
-                btnM3uPlaylist.setOnClickListener(v -> { clickFeedback(); currentBrowserMode = BROWSER_PLAYLISTS; buildM3uPlaylistUI(); });
+                btnM3uPlaylist.setOnClickListener(v -> { clickFeedback(); lastBrowserFocusText = "FROM_LIBRARY"; currentBrowserMode = BROWSER_PLAYLISTS; buildM3uPlaylistUI(); });
                 containerBrowserItems.addView(btnM3uPlaylist);
 
                 //Button btnFolder = createListButton("📁 " + t("Folders"));
@@ -6449,8 +6449,12 @@ public class MainActivity extends Activity {
                         case "OPEN_WIFI": changeScreen(STATE_WIFI); break;
                         case "OPEN_BRIGHTNESS": changeScreen(STATE_BRIGHTNESS); break;
                         case "OPEN_STORAGE_INFO": changeScreen(STATE_STORAGE); break;
-                        case "OPEN_WIDGET_SETTINGS":
-                            isNavigatingToSubMenu = true; changeScreen(STATE_SETTINGS); buildWidgetSettingsUI(); isNavigatingToSubMenu = false; break;
+                        // 🚀 [신규 숏컷] 메인 화면에서 재생목록(Playlists) 화면으로 점프하는 직통 채널 개설!
+                        case "OPEN_PLAYLISTS":
+                            lastBrowserFocusText = "";              // 🚀 메인에서 다이렉트로 들어왔으므로 경로 기억 변수를 깨끗하게 비워둡니다!
+                            currentBrowserMode = BROWSER_PLAYLISTS; // 💡 브라우저 모드를 재생목록 모드로 장전!
+                            changeScreen(STATE_BROWSER);            // 💡 파일 탐색기 화면을 켜서 즉시 렌더링 지시!
+                            break;
                         case "OPEN_BACKGROUND_SETTINGS":
                             isNavigatingToSubMenu = true; changeScreen(STATE_SETTINGS); buildBackgroundSettingsUI(); isNavigatingToSubMenu = false; break;
                         case "OPEN_THEME_SETTINGS":
@@ -6832,10 +6836,10 @@ public class MainActivity extends Activity {
 
         if (favoritePaths.contains(path)) {
             favoritePaths.remove(path);
-            Toast.makeText(this, "♡ Removed from Favorites", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, t("Removed from Favorites."), Toast.LENGTH_SHORT).show();
         } else {
             favoritePaths.add(path);
-            Toast.makeText(this, "♥ Added to Favorites", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, t("Added to Favorites."), Toast.LENGTH_SHORT).show();
         }
 
         try {
@@ -7271,9 +7275,17 @@ public class MainActivity extends Activity {
                             lastBrowserFocusText = t("All Audiobooks");
                             buildFileBrowserUI();
                         } else if (currentBrowserMode == BROWSER_PLAYLISTS) {
-                            currentBrowserMode = BROWSER_ROOT;
-                            lastBrowserFocusText = t("Playlists");
-                            buildFileBrowserUI();
+                            // 🚀 [지능형 다이렉트 퇴근 센서 장착]
+                            // 라이브러리 메뉴를 거치지 않고 메인 화면 숏컷으로 바로 들어왔다면 메인으로 즉시 복귀!
+                            if (lastBrowserFocusText == null || lastBrowserFocusText.trim().isEmpty() || !lastBrowserFocusText.equals("FROM_LIBRARY")) {
+                                applyThemeToMainMenu(); // 메인 화면 UI 리프레시
+                                changeScreen(STATE_MENU);
+                            } else {
+                                // 라이브러리 메뉴를 통해 정석으로 들어왔다면 기존처럼 부모 메뉴(BROWSER_ROOT)로 복귀
+                                currentBrowserMode = BROWSER_ROOT;
+                                lastBrowserFocusText = t("Playlists");
+                                buildFileBrowserUI();
+                            }
                         } else if (currentBrowserMode == BROWSER_M3U_SONGS) {
                             currentBrowserMode = BROWSER_PLAYLISTS;
                             buildM3uPlaylistUI();
@@ -9040,7 +9052,7 @@ public class MainActivity extends Activity {
 
         // 🚀 1. 촌스러운 시스템 타이틀 대신, 메인 화면과 똑같은 '커스텀 타이틀'을 우리가 직접 그립니다!
         TextView tvTitle = new TextView(this);
-        tvTitle.setText("━ ADD TO PLAYLIST ━");
+        tvTitle.setText("━ "+t("ADD TO PLAYLIST")+" ━");
         tvTitle.setTextColor(0xFFFFFFFF); // 하늘색으로 예쁘게!
         tvTitle.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.BOLD);
         tvTitle.setGravity(android.view.Gravity.CENTER);
@@ -9087,8 +9099,7 @@ public class MainActivity extends Activity {
         dialog.requestWindowFeature(Window.FEATURE_NO_TITLE);
 
         // 4. [첫 번째 버튼] 새 플레이리스트 만들기
-        Button btnNew = createListButton("➕ Create New Playlist");
-        btnNew.setTextColor(0xFF00FFFF);
+        android.view.View btnNew = createListButtonWithIcon("\uE145", t("Create New Playlist"));
         btnNew.setOnKeyListener(dialogWheelListener); // 🚀 버튼에 팝업 전용 조향 장치 연결!
         btnNew.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -9097,7 +9108,7 @@ public class MainActivity extends Activity {
                 int count = 1;
                 File newPlaylistFile;
                 do {
-                    newPlaylistFile = new File(playlistDir, "Playlist " + count + ".m3u8");
+                    newPlaylistFile = new File(playlistDir, t("Playlist ") + count + ".m3u8");
                     count++;
                 } while (newPlaylistFile.exists());
 
@@ -9111,7 +9122,10 @@ public class MainActivity extends Activity {
         // 5. [나머지 버튼들] 기존 플레이리스트 파일들 목록
         for (final File targetM3u : playlistFiles) {
             String cleanName = targetM3u.getName().substring(0, targetM3u.getName().lastIndexOf("."));
-            Button btnExisting = createListButton("📝 " + cleanName);
+
+            android.view.View btnExisting = createListButtonWithIcon("\uE05F", cleanName);
+
+
             btnExisting.setOnKeyListener(dialogWheelListener); // 🚀 버튼에 팝업 전용 조향 장치 연결!
             btnExisting.setOnClickListener(new View.OnClickListener() {
                 @Override

@@ -129,21 +129,28 @@ public class ThemeManager {
         defaultTheme.menuElements.add(new MenuElement("box", "box", "", "none", "", 0, 0, 240, 325, "", "", "", "", "", "", "", "", "NONE", "top|left", 0, -1, 16, -1, "bottom", "left", "#A0000000", 0, 0, 0, 1.0f));
         defaultTheme.menuElements.add(new MenuElement("main_scroll_list", "list_box", "", "none", "", 10, 15, 220, 290, "", "", "", "", "", "", "", "", "NONE", "top|left", -1, -1, 16, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
 
-        // 2. 왼쪽 메인 리스트 전용 버튼 8종 세트 (평상시 아이콘은 비우고 우측 프리뷰용 파일명 정상 배치)
+        // 2. 왼쪽 메인 리스트 전용 버튼 9종 세트 (🚀 Playlists 추가 및 포커스 인덱스 +1씩 자동 밀림!)
         defaultTheme.menuElements.add(new MenuElement("btn_now", "button", "main_scroll_list", "none", "", 0, 0, -1, 48, "Now Playing", "Now Playing", "〉", "", "", "", "", "music_circle.png", "OPEN_PLAYER", "top|left", -1, 0, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
         defaultTheme.menuElements.add(new MenuElement("btn_music", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Music", "Music", "〉", "", "", "", "", "music_list.png", "OPEN_BROWSER", "top|left", -1, 1, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
-        defaultTheme.menuElements.add(new MenuElement("btn_radio", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Radio", "Radio", "〉", "", "", "", "", "radio_circle.png", "OPEN_RADIO", "top|left", -1, 2, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
-        defaultTheme.menuElements.add(new MenuElement("btn_audiobook", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Audiobooks", "Audiobooks", "〉", "", "", "", "", "music_list.png", "OPEN_AUDIOBOOKS", "top|left", -1, 3, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
-        defaultTheme.menuElements.add(new MenuElement("btn_bt", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Bluetooth", "Bluetooth", "〉", "", "", "", "", "bluetooth_circle.png", "OPEN_BLUETOOTH", "top|left", -1, 4, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
-        defaultTheme.menuElements.add(new MenuElement("btn_wifi", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Wi-Fi", "Wi-Fi", "〉", "", "", "", "", "icon_wifi.png", "OPEN_WIFI", "top|left", -1, 5, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
-        defaultTheme.menuElements.add(new MenuElement("btn_set", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Settings", "Settings", "〉", "", "", "", "", "setting_circle.png", "OPEN_SETTINGS", "top|left", -1, 6, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
-        defaultTheme.menuElements.add(new MenuElement("btn_web", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "PC Upload", "PC Upload", "〉", "", "", "", "", "file_sync.png", "OPEN_WEBSERVER", "top|left", -1, 7, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
 
-        // 3. 우측 포커스 연동형 다이내믹 위젯 세트 (visible_on_focus 타겟 매핑 동기화 및 30개 파라미터 공식 완전 일치)
-        // 3. 우측 포커스 연동형 다이내믹 위젯 세트 (visible_on_focus 타겟 매핑 동기화 및 30개 파라미터 공식 완전 일치)
+        // 🚀 [신규 추가] Playlists 다이렉트 숏컷 (포커스 인덱스: 2번)
+        defaultTheme.menuElements.add(new MenuElement("btn_playlist", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Playlists", "Playlists", "〉", "", "", "", "", "icon_playlist.png", "OPEN_PLAYLISTS", "top|left", -1, 2, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
+
+        defaultTheme.menuElements.add(new MenuElement("btn_radio", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Radio", "Radio", "〉", "", "", "", "", "radio_circle.png", "OPEN_RADIO", "top|left", -1, 3, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
+        defaultTheme.menuElements.add(new MenuElement("btn_audiobook", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Audiobooks", "Audiobooks", "〉", "", "", "", "", "music_list.png", "OPEN_AUDIOBOOKS", "top|left", -1, 4, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
+        defaultTheme.menuElements.add(new MenuElement("btn_bt", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Bluetooth", "Bluetooth", "〉", "", "", "", "", "bluetooth_circle.png", "OPEN_BLUETOOTH", "top|left", -1, 5, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
+        defaultTheme.menuElements.add(new MenuElement("btn_wifi", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Wi-Fi", "Wi-Fi", "〉", "", "", "", "", "icon_wifi.png", "OPEN_WIFI", "top|left", -1, 6, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
+        defaultTheme.menuElements.add(new MenuElement("btn_set", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "Settings", "Settings", "〉", "", "", "", "", "setting_circle.png", "OPEN_SETTINGS", "top|left", -1, 7, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
+        defaultTheme.menuElements.add(new MenuElement("btn_web", "button", "main_scroll_list", "none", "", 0, 8, -1, 48, "PC Upload", "PC Upload", "〉", "", "", "", "", "file_sync.png", "OPEN_WEBSERVER", "top|left", -1, 8, 22, -1, "bottom", "left", "", 0, 0, 0, 1.0f));
+
+        // 3. 우측 포커스 연동형 다이내믹 위젯 세트
         defaultTheme.menuElements.add(new MenuElement("widget_clock", "widget_clock", "", "none", "btn_now", 284, 18, 150, 81, "", "", "", "", "", "", "", "", "NONE", "top|left", 0, -1, 16, -1, "bottom", "left", "", 8, 0, 0, 1.0f));
         defaultTheme.menuElements.add(new MenuElement("widget_album", "widget_album", "", "none", "btn_now", 254, 13, 211, 212, "", "", "", "", "", "", "", "", "NONE", "bottom|left", -1, -1, 16, 12, "bottom", "center", "", 0, 0, 0, 1.0f));
-        defaultTheme.menuElements.add(new MenuElement("widget_bt_preview", "widget_focus_image", "", "none", "btn_bt", 254, 13, 211, 212, "", "", "", "", "", "", "", "bluetooth_circle.png", "NONE", "top|left", -1, -1, 16, -1, "bottom", "center", "", 0, 0, 0, 1.0f));
+
+        // 🚀 [디자인 수정 완료] 이미지 폭/높이를 211x212 -> 140x140으로 줄이고, 위치를 정중앙(x:290, y:90)으로 내렸습니다!
+        // 💡 팁: 5번째 파라미터인 타겟 버튼("btn_bt")을 "" (빈칸)으로 비워두면, 모든 메뉴 버튼의 아이콘을 자동으로 띄워주는 글로벌 만능 위젯으로 작동합니다!
+        defaultTheme.menuElements.add(new MenuElement("widget_bt_preview", "widget_focus_image", "", "none", "btn_bt", 290, 90, 140, 140, "", "", "", "", "", "", "", "bluetooth_circle.png", "NONE", "top|left", -1, -1, 16, -1, "bottom", "center", "", 0, 0, 0, 1.0f));
+
         availableThemes.add(defaultTheme);
 
         if (!themeFolder.exists()) {
