@@ -84,10 +84,11 @@ public class SongListAdapter extends BaseAdapter {
             @Override
             public void onClick(View v) {
                 MainActivity.instance.clickFeedback();
-                MainActivity.instance.currentIndex = position;
-                MainActivity.instance.currentPlaylist.clear();
-                MainActivity.instance.currentPlaylist.addAll(MainActivity.instance.virtualSongList);
-                com.themoon.y1.managers.AudioPlayerManager.getInstance().prepareMusicTrack(MainActivity.instance.currentIndex);
+
+                // 🚀 [정식 셔플 엔진 직결!] 어댑터가 불법으로 리스트를 조작하지 않고, 절대 셔플 엔진으로 리스트를 몽땅 던져줍니다!
+                com.themoon.y1.managers.AudioPlayerManager.getInstance().playTrackList(MainActivity.instance.virtualSongList, position);
+
+                // 플레이어 화면으로 전환
                 MainActivity.instance.changeScreen(3); // 3: STATE_PLAYER
             }
         });

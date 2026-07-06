@@ -480,9 +480,10 @@ public class MainActivity extends Activity {
         if (wm == null) return;
 
         if (isGoingToSleep) {
-            // 💡 잠들 때: 웹 서버가 돌고 있지 않다면 와이파이 강제 차단!
-            if (wm.isWifiEnabled()) {
-                wasWifiOnBeforeSleep = true; // 원래 켜져 있었다고 기억장치에 저장
+            // 💡 [버그 해결] 완전히 켜져 있거나 '켜지는 중(Enabling)'일 때를 모두 '켜진 상태'로 기억하게 만듭니다!
+            boolean isWifiActive = wm.isWifiEnabled() || wm.getWifiState() == WifiManager.WIFI_STATE_ENABLING;
+            if (isWifiActive) {
+                wasWifiOnBeforeSleep = true;
                 if (!isServerRunning) {
                     wm.setWifiEnabled(false);
                 }
@@ -520,6 +521,9 @@ public class MainActivity extends Activity {
                         float alpha = 0.0f;
                         @Override
                         public void run() {
+                            // 🚀 [충돌 완벽 방어막] 꺼지는 도중에 화면을 깨우면, 즉시 암전 스크립트를 파쇄합니다!
+                            if (!isFakeScreenOff) return;
+
                             alpha += 0.08f; // 💡 이 숫자를 낮추면 더 천천히 어두워집니다.
                             if (alpha >= 1.0f) {
                                 layoutLoadingOverlay.setAlpha(1.0f);
@@ -5459,7 +5463,9 @@ public class MainActivity extends Activity {
                     } catch (Exception e) {}
                 }
 
-                String key = song.artist + " - " + song.album;
+                // 🚀 [중복 앨범 파쇄기] 아티스트 이름(피처링)이 다르더라도, 같은 '폴더' 안의 같은 '앨범 이름'이라면 무조건 1장의 카드로 묶어버립니다!
+                String key = song.file.getParentFile().getAbsolutePath() + " - " + song.album;
+
                 if (!checkedAlbums.contains(key)) {
                     checkedAlbums.add(key);
                     uniqueAlbumList.add(song);
@@ -8260,6 +8266,9 @@ public class MainActivity extends Activity {
                             float alpha = 1.0f;
                             @Override
                             public void run() {
+                                // 🚀 [충돌 완벽 방어막] 깨어나는 도중에 다시 화면을 끄면, 즉시 깨우기 스크립트를 파쇄합니다!
+                                if (isFakeScreenOff) return;
+
                                 alpha -= 0.08f;
                                 if (alpha <= 0.0f) {
                                     layoutLoadingOverlay.setAlpha(0.0f);

@@ -155,22 +155,37 @@ public class AudioPlayerManager {
 
         initPlayer(main);
 
+        // 1. 외부에서 받은 리스트를 안전하게 복사
         List<File> newList = new java.util.ArrayList<>(list);
+        if (newList.isEmpty()) return; // 방어막: 리스트가 텅 비었으면 함수를 중단!
+
+        // 2. 사용자가 클릭한 원본(타겟) 노래를 미리 기억해 둡니다.
+        // 만약 인덱스가 꼬여서 리스트 범위를 벗어났다면 안전하게 0번으로 고정!
+        if (index < 0 || index >= newList.size()) index = 0;
+        File targetSong = newList.get(index);
+
+        // 3. 메인 화면의 재생 바구니(Playlist) 2개를 싹 비우고 새 곡들로 채웁니다.
         main.originalPlaylist.clear();
         main.originalPlaylist.addAll(newList);
         main.currentPlaylist.clear();
         main.currentPlaylist.addAll(newList);
 
+        // 🚀 4. [절대 셔플 엔진 가동] 설정에서 셔플 모드가 켜져 있다면? 무조건 섞습니다!
         boolean isShuffle = main.prefs.getBoolean("shuffle", false);
-        if (isShuffle && !newList.isEmpty()) {
-            File currentSong = main.originalPlaylist.get(index);
-            java.util.Collections.shuffle(main.currentPlaylist);
-            main.currentIndex = main.currentPlaylist.indexOf(currentSong);
-            if (main.currentIndex == -1) main.currentIndex = 0;
+        if (isShuffle) {
+            java.util.Collections.shuffle(main.currentPlaylist); // currentPlaylist를 사정없이 섞음!
+
+            // 섞인 바구니 안에서 방금 사용자가 누른 그 곡(targetSong)이 몇 번 자리로 밀려났는지 찾아냅니다.
+            main.currentIndex = main.currentPlaylist.indexOf(targetSong);
+            if (main.currentIndex == -1) main.currentIndex = 0; // 혹시나 못 찾으면 0번 재생
         } else {
+            // 셔플이 꺼져있다면 원본 순서 그대로!
             main.currentIndex = index;
         }
-
+// 🚀 [추가] ExoPlayer 엔진 자체에도 셔플 상태를 명확히 인지시킵니다!
+        if (!isUsingLegacyPlayer && exoPlayer != null) {
+            exoPlayer.setShuffleModeEnabled(isShuffle);
+        }
         main.isPausedByHand = false; // 🚀 스위치를 미리 켜줍니다!
         prepareMusicTrack(main.currentIndex);
         main.updatePlayerUI(); // 🚀 타이머 즉시 시작!
@@ -450,7 +465,9 @@ public class AudioPlayerManager {
 
                 exoPlayer.setMediaSource(mediaSource);
                 exoPlayer.prepare(); // 💡 장전 완료!
-
+// 🚀 [추가 확인사살] 곡을 장전할 때마다 현재 셔플 상태를 엑소 엔진에 강제 주입!
+                boolean isShuffle = main.prefs.getBoolean("shuffle", false);
+                exoPlayer.setShuffleModeEnabled(isShuffle);
                 // 🚀 [핵심 로직 2] 쏘기 직전, 오디오북인지 검사하고 기억해둔 시간으로 강제 점프!
                 int savedPos = main.prefs.getInt("book_pos_" + track.getAbsolutePath(), 0);
                 if (savedPos > 0 && (main.isAudiobookLibraryMode || track.getAbsolutePath().contains("/Audiobooks"))) {
