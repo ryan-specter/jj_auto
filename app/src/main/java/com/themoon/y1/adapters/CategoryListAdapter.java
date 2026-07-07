@@ -95,22 +95,35 @@ public class CategoryListAdapter extends BaseAdapter {
                             break; // 실제 파일이 존재하면 즉시 탈출!
                         }
 
-                        // ③ 인터넷 이미지가 없다면 파일 내부 내장 아트(Embedded) 후보로 등록 (FLAC 제외)
+                        // 🚀 ③ 인터넷 이미지가 없다면 파일 내부 내장 아트(Embedded) 후보로 등록 (FLAC 제외, OPUS는 4.0 스캐너 투입!)
                         if (embeddedPic == null && !trackPath.toLowerCase().endsWith(".flac")) {
-                            android.media.MediaMetadataRetriever mmr = null;
-                            java.io.FileInputStream fis = null;
-                            try {
-                                mmr = new android.media.MediaMetadataRetriever();
-                                fis = new java.io.FileInputStream(trackPath);
-                                mmr.setDataSource(fis.getFD());
-                                byte[] pic = mmr.getEmbeddedPicture();
-                                if (pic != null && pic.length > 0) {
-                                    embeddedPic = pic;
+
+                            // 🌟 [추가된 4.0 스캐너] Opus 파일일 경우 바주카포 출동!
+                            if (trackPath.toLowerCase().endsWith(".opus")) {
+                                try {
+                                    Object[] opusTags = com.themoon.y1.managers.AudioPlayerManager.getInstance().extractOpusMetadata(new File(trackPath));
+                                    if (opusTags[5] != null) {
+                                        embeddedPic = (byte[]) opusTags[5]; // 5번 서랍에 든 앨범 아트 빼오기
+                                    }
+                                } catch (Exception e) {}
+                            }
+                            // 🌟 기존 파일(MP3 등)은 안드로이드 순정 부품 사용
+                            else {
+                                android.media.MediaMetadataRetriever mmr = null;
+                                java.io.FileInputStream fis = null;
+                                try {
+                                    mmr = new android.media.MediaMetadataRetriever();
+                                    fis = new java.io.FileInputStream(trackPath);
+                                    mmr.setDataSource(fis.getFD());
+                                    byte[] pic = mmr.getEmbeddedPicture();
+                                    if (pic != null && pic.length > 0) {
+                                        embeddedPic = pic;
+                                    }
+                                } catch (Exception e) {
+                                } finally {
+                                    try { if (fis != null) fis.close(); } catch (Exception e) {}
+                                    try { if (mmr != null) mmr.release(); } catch (Exception e) {}
                                 }
-                            } catch (Exception e) {
-                            } finally {
-                                try { if (fis != null) fis.close(); } catch (Exception e) {}
-                                try { if (mmr != null) mmr.release(); } catch (Exception e) {}
                             }
                         }
                     }

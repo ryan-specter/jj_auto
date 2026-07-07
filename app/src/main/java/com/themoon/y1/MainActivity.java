@@ -1944,7 +1944,6 @@ public class MainActivity extends Activity {
                 } else if (isAudioFile(f)) {
                     if (blacklist.contains(f.getAbsolutePath())) continue;
 
-                    // 🚀 [해결] 기본값 장전 (오디오북/뮤직 분리)
                     String title = f.getName();
                     boolean isBook = (targetLibrary == audiobookLibrary);
                     String artist = isBook ? t("Unknown Author") : t("Unknown Artist");
@@ -1961,7 +1960,7 @@ public class MainActivity extends Activity {
                         String y = null;
                         String g = null;
 
-                        // 🚀 [핵심 추가] Opus 파일은 4.0 스캐너 투입!
+                        // 🚀 [스캐너 가동]
                         if (f.getName().toLowerCase().endsWith(".opus")) {
                             Object[] opusTags = com.themoon.y1.managers.AudioPlayerManager.getInstance().extractOpusMetadata(f);
                             if (opusTags[0] != null) t = (String) opusTags[0];
@@ -1970,7 +1969,6 @@ public class MainActivity extends Activity {
                             if (opusTags[3] != null) y = (String) opusTags[3];
                             if (opusTags[4] != null) g = (String) opusTags[4];
                         } else {
-                            // 🚀 MP3/FLAC 등은 안드로이드 순정 부품 사용
                             MediaMetadataRetriever mmr = new MediaMetadataRetriever();
                             java.io.FileInputStream fis = new java.io.FileInputStream(f);
                             mmr.setDataSource(fis.getFD());
@@ -1986,10 +1984,31 @@ public class MainActivity extends Activity {
                             mmr.release();
                         }
 
-                        // 추출된 텍스트 덮어쓰기
+                        // 🚀 [근본 수술 완료] 호적(DB) 등록 시 폴더 이름 강제 변환 엔진 적용!
                         if (t != null && !t.trim().isEmpty()) title = t;
-                        if (a != null && !a.trim().isEmpty()) artist = a;
-                        if (al != null && !al.trim().isEmpty()) album = al;
+
+                        if (a != null && !a.trim().isEmpty()) {
+                            artist = a;
+                        } else {
+                            // 💡 가수가 없으면 상위 폴더(예: 가수 폴더) 이름으로 강제 할당!
+                            try {
+                                String parentName = f.getParentFile().getParentFile().getName();
+                                if (parentName != null && !parentName.equals("Music") && !parentName.equals("Audiobooks") && !parentName.equals("sdcard0")) {
+                                    artist = parentName;
+                                }
+                            } catch (Exception e) {}
+                        }
+
+                        if (al != null && !al.trim().isEmpty()) {
+                            album = al;
+                        } else {
+                            // 💡 앨범이 없으면 파일이 들어있는 직속 폴더 이름으로 강제 할당!
+                            String folderName = f.getParentFile().getName();
+                            if (folderName != null && !folderName.equals("Music") && !folderName.equals("Audiobooks") && !folderName.equals("sdcard0")) {
+                                album = folderName;
+                            }
+                        }
+
                         if (y != null && !y.trim().isEmpty()) year = y;
                         if (g != null && !g.trim().isEmpty()) genre = g;
 
@@ -2001,7 +2020,6 @@ public class MainActivity extends Activity {
                         }
                     } catch (Exception e) {}
 
-                    // 🚀 [안전지대] 에러가 났어도 바구니에 담기!
                     targetLibrary.add(new SongItem(f, title, artist, album, year, genre));
                     trackNumberMap.put(f.getAbsolutePath(), trackNum);
 
@@ -2023,7 +2041,6 @@ public class MainActivity extends Activity {
             }
         }
     }
-
     // 3. 중앙 스캔 엔진 (두 폴더를 순서대로 스캔합니다)
     private void startMediaLibraryScan() {
         if (isCustomScanning) return;
@@ -5489,20 +5506,7 @@ public class MainActivity extends Activity {
 
             if (isPathMatched) {
                 // 💡 [태그 복구 엔진] 앨범 이름이 없으면 음원이 든 폴더 이름으로 강제 변환!
-                String albumName = song.album;
-                if (albumName == null || albumName.equals(t("Unknown Album")) || albumName.equals(t("Unknown Book")) || albumName.trim().isEmpty()) {
-                    albumName = song.file.getParentFile().getName();
-                    song.album = albumName;
-                }
 
-                if (song.artist == null || song.artist.equals(t("Unknown Artist")) || song.artist.equals(t("Unknown Author")) || song.artist.trim().isEmpty()) {
-                    try {
-                        String parentName = song.file.getParentFile().getParentFile().getName();
-                        if (!parentName.equals("Music") && !parentName.equals("Audiobooks") && !parentName.equals("sdcard0")) {
-                            song.artist = parentName;
-                        }
-                    } catch (Exception e) {}
-                }
 
                 // 🚀 [중복 앨범 파쇄기] 아티스트 이름(피처링)이 다르더라도, 같은 '폴더' 안의 같은 '앨범 이름'이라면 무조건 1장의 카드로 묶어버립니다!
                 String key = song.file.getParentFile().getAbsolutePath() + " - " + song.album;
@@ -5733,10 +5737,23 @@ public class MainActivity extends Activity {
 
                 if (bmp == null) {
                     try {
-                        MediaMetadataRetriever mmr = new MediaMetadataRetriever();
-                        mmr.setDataSource(path);
-                        byte[] embeddedArt = mmr.getEmbeddedPicture();
-                        mmr.release();
+                        byte[] embeddedArt = null;
+
+                        // 🚀 [해결] 파일이 Opus라면 무조건 우리가 만든 4.0 통합 스캐너를 투입합니다!
+                        if (path.toLowerCase().endsWith(".opus")) {
+                            Object[] opusTags = com.themoon.y1.managers.AudioPlayerManager.getInstance().extractOpusMetadata(new File(path));
+                            if (opusTags[5] != null) {
+                                embeddedArt = (byte[]) opusTags[5]; // 5번이 앨범 아트 바이트 배열입니다.
+                            }
+                        } else {
+                            // 🚀 MP3나 FLAC은 기존처럼 안드로이드 순정 부품 사용
+                            MediaMetadataRetriever mmr = new MediaMetadataRetriever();
+                            mmr.setDataSource(path);
+                            embeddedArt = mmr.getEmbeddedPicture();
+                            mmr.release();
+                        }
+
+                        // 🚀 빼온 사진 데이터(Byte)를 예쁜 비트맵(Bitmap)으로 구워냅니다.
                         if (embeddedArt != null) {
                             BitmapFactory.Options opts = new BitmapFactory.Options();
                             opts.inSampleSize = 2;
