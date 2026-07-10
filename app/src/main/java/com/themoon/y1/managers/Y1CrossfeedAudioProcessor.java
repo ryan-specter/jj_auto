@@ -52,7 +52,10 @@ public class Y1CrossfeedAudioProcessor implements AudioProcessor {
 
     @Override
     public boolean isActive() {
-        return pendingAudioFormat != AudioFormat.NOT_SET; // 💡 실시간 스위치 조작을 위해 배관 연결 상시 유지
+        // 🚀 [진짜 프리패스 장착] 16비트 스테레오가 아닌 파일은 필터를 배관에서 완전히 뽑아냅니다! (절단 버그 원천 차단)
+        if (!isFormatSupported) return false;
+
+        return pendingAudioFormat != AudioFormat.NOT_SET;
     }
 
     @Override

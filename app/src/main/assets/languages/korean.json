@@ -1,4 +1,7 @@
 { 
+  "Today": "오늘",
+  "Yesterday": "어제",
+  "Recently Added": "최근 추가된 곡",
   "Crossfeed": "크로스피드",
   "EQ Engine Mode": "EQ 엔진 모드",
   "Software (10-Band)": "소프트웨어 (10-밴드)",
@@ -143,8 +146,8 @@
   "Scanning Media...": "미디어 스캔 중...",
   "Scan Media Library": "미디어 라이브러리 스캔",
   "Path": "경로",
-  "USB Disconnect Required (Tap to go back)": "USB 연결 해제 필요 (터치하여 뒤로 가기)",
-  "Empty Folder (Tap to go back)": "빈 폴더 (터치하여 뒤로 가기)",
+  "USB Disconnect Required (Tap to go back)": "USB 연결 해제 필요",
+  "Empty Folder (Tap to go back)": "빈 폴더",
   "Play All": "전체 재생",
   "No audio files found in subfolders.": "하위 폴더에 오디오 파일이 없습니다.",
   "INSTALL": "설치",

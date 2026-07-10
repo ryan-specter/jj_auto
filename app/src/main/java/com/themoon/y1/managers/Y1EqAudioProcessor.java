@@ -33,8 +33,16 @@ public class Y1EqAudioProcessor implements AudioProcessor {
         currentGains[bandIndex] = dbGain;
 
         if (outputAudioFormat.sampleRate > 0) {
+            float fs = outputAudioFormat.sampleRate;
+            float f0 = CENTER_FREQS[bandIndex];
+            
+            // 🚀 [버그 수정] f0가 Nyquist 주파수(fs/2)를 넘어가면 필터가 붕괴(NaN)되어 소리가 안 나는 현상 방지!
+            if (f0 >= fs / 2.0f) {
+                f0 = (fs / 2.0f) * 0.99f;
+            }
+            
             for (int ch = 0; ch < 2; ch++) {
-                filters[ch][bandIndex].setPeakingEQ(outputAudioFormat.sampleRate, CENTER_FREQS[bandIndex], 1.414f, dbGain);
+                filters[ch][bandIndex].setPeakingEQ(fs, f0, 1.414f, dbGain);
             }
         }
     }
@@ -56,7 +64,10 @@ public class Y1EqAudioProcessor implements AudioProcessor {
 
     @Override
     public boolean isActive() {
-        return pendingAudioFormat != AudioFormat.NOT_SET; // 💡 실시간 스위치 조작을 위해 배관 상시 연결
+        // 🚀 [진짜 프리패스 장착] 16비트가 아닌 고음질 파일은 필터를 배관에서 완전히 뽑아냅니다! (절단 버그 원천 차단)
+        if (!isFormatSupported) return false;
+
+        return pendingAudioFormat != AudioFormat.NOT_SET;
     }
 
     @Override

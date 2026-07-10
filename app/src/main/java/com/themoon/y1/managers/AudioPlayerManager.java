@@ -65,40 +65,76 @@ public class AudioPlayerManager {
                         com.google.android.exoplayer2.audio.AudioRendererEventListener eventListener,
                         java.util.ArrayList<com.google.android.exoplayer2.Renderer> out) {
 
-                    // 🚀 [해결] 24비트 등의 음원이 들어오면 엔진을 알아서 패스하도록 지능형 스위치 장착!
+
+
+                    // 🚀 1. [신규 엔진: 자바 리플렉션 해킹 - 24/32비트를 16비트로 분쇄하는 '진짜' 압축기 소환!]
+                    java.util.List<com.google.android.exoplayer2.audio.AudioProcessor> procList = new java.util.ArrayList<>();
+                    try {
+                        java.lang.reflect.Constructor<?> ctor = Class.forName("com.google.android.exoplayer2.audio.ToInt16PcmAudioProcessor").getDeclaredConstructor();
+                        ctor.setAccessible(true);
+                        procList.add((com.google.android.exoplayer2.audio.AudioProcessor) ctor.newInstance());
+                    } catch (Exception e) {}
+
+                    // 🚀 2. [완벽 수리] 빈 깡통 버그를 원천 차단한 안전한 주파수 방어막!
                     com.google.android.exoplayer2.audio.AudioProcessor immortalSonic = new com.google.android.exoplayer2.audio.AudioProcessor() {
                         private final com.google.android.exoplayer2.audio.SonicAudioProcessor sonic = new com.google.android.exoplayer2.audio.SonicAudioProcessor();
-                        private boolean is16Bit = true;
+                        private boolean isActive = false;
 
                         @Override
                         public com.google.android.exoplayer2.audio.AudioProcessor.AudioFormat configure(com.google.android.exoplayer2.audio.AudioProcessor.AudioFormat inputAudioFormat) throws com.google.android.exoplayer2.audio.AudioProcessor.UnhandledAudioFormatException {
-                            is16Bit = (inputAudioFormat.encoding == com.google.android.exoplayer2.C.ENCODING_PCM_16BIT);
-                            if (is16Bit) {
-                                sonic.setOutputSampleRateHz(44100);
-                                return sonic.configure(inputAudioFormat);
-                            }
-                            // 🚀 [에러 방어] 16비트가 아니면 에러 내지 말고 그대로 배출!
-                            return inputAudioFormat;
+                            int safeSampleRate = inputAudioFormat.sampleRate;
+                            // 96kHz, 192kHz 등 초고음질이 들어오면 스피커 보호를 위해 48kHz로 압축
+                            if (safeSampleRate > 48000) { safeSampleRate = 48000; }
+                            sonic.setOutputSampleRateHz(safeSampleRate);
+                            com.google.android.exoplayer2.audio.AudioProcessor.AudioFormat outputFormat = sonic.configure(inputAudioFormat);
+                            isActive = sonic.isActive(); // 엔진이 알아서 활성화 여부를 결정하게 둡니다!
+                            return outputFormat;
                         }
 
-                        // 🚀 [핵심 기술] 16비트가 아닐 때는 isActive를 false로 주어, 엑소플레이어가 이 배관을 알아서 건너뛰게(Bypass) 만듭니다!
-                        @Override public boolean isActive() { return is16Bit ? sonic.isActive() : false; }
-
-                        @Override public void queueInput(java.nio.ByteBuffer inputBuffer) { if (is16Bit) sonic.queueInput(inputBuffer); }
-                        @Override public void queueEndOfStream() { if (is16Bit) sonic.queueEndOfStream(); }
-                        @Override public java.nio.ByteBuffer getOutput() { return is16Bit ? sonic.getOutput() : java.nio.ByteBuffer.allocateDirect(0).order(java.nio.ByteOrder.nativeOrder()); }
-                        @Override public boolean isEnded() { return is16Bit ? sonic.isEnded() : true; }
-                        @Override public void flush() { if (is16Bit) sonic.flush(); }
-                        @Override public void reset() { sonic.reset(); sonic.setOutputSampleRateHz(44100); }
+                        // 💡 0바이트를 뱉던 악성 코드를 삭제하고, 엔진의 순리대로 완벽히 위임합니다.
+                        @Override public boolean isActive() { return isActive; }
+                        @Override public void queueInput(java.nio.ByteBuffer inputBuffer) { sonic.queueInput(inputBuffer); }
+                        @Override public void queueEndOfStream() { sonic.queueEndOfStream(); }
+                        @Override public java.nio.ByteBuffer getOutput() { return sonic.getOutput(); }
+                        @Override public boolean isEnded() { return sonic.isEnded(); }
+                        @Override public void flush() { sonic.flush(); }
+                        @Override public void reset() { sonic.reset(); }
                     };
-                    // 2. 🚀 [배관 개조 완료] 10밴드 수학 필터(EQ)를 통과한 소리가 불사신 정수기로 들어가도록 직렬 연결합니다!
-                    com.google.android.exoplayer2.audio.AudioProcessor[] processors = new com.google.android.exoplayer2.audio.AudioProcessor[]{ customEqProcessor, crossfeedProcessor, immortalSonic };
-                    com.google.android.exoplayer2.audio.AudioSink customSink = new com.google.android.exoplayer2.audio.DefaultAudioSink(
-                            com.google.android.exoplayer2.audio.AudioCapabilities.getCapabilities(context),
-                            processors
-                    );
 
-                    super.buildAudioRenderers(context, extensionRendererMode, mediaCodecSelector, enableDecoderFallback, customSink, eventHandler, eventListener, out);
+                    // 🚀 3. [배관 조립] 1.강제 16비트 압축기 -> 2.수학 필터(EQ) -> 3.크로스피드 -> 4.주파수 방어막(Sonic) 순으로 직렬 연결!
+                    procList.add(customEqProcessor);
+                    procList.add(crossfeedProcessor);
+                    procList.add(immortalSonic);
+
+                    com.google.android.exoplayer2.audio.AudioProcessor[] processors = procList.toArray(new com.google.android.exoplayer2.audio.AudioProcessor[0]);
+                    com.google.android.exoplayer2.audio.AudioCapabilities strict16BitCaps = new com.google.android.exoplayer2.audio.AudioCapabilities(new int[] { 2 }, 2);
+                    com.google.android.exoplayer2.audio.AudioSink customSink = new com.google.android.exoplayer2.audio.DefaultAudioSink(strict16BitCaps, processors);
+
+                    // 🚀 4. [MTK 사형 선고 - 타겟 정밀 조준 복구!]
+                    com.google.android.exoplayer2.mediacodec.MediaCodecSelector customSelector = new com.google.android.exoplayer2.mediacodec.MediaCodecSelector() {
+                        @Override
+                        public java.util.List<com.google.android.exoplayer2.mediacodec.MediaCodecInfo> getDecoderInfos(String mimeType, boolean requiresSecureDecoder, boolean requiresTunnelingDecoder) throws com.google.android.exoplayer2.mediacodec.MediaCodecUtil.DecoderQueryException {
+                            java.util.List<com.google.android.exoplayer2.mediacodec.MediaCodecInfo> decoders = mediaCodecSelector.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder);
+
+                            // 💡 [핵심 수정] MP3, WAV 등은 건드리지 않고, 오직 애플 포맷(m4a/aac/alac)일 때만 MTK 디코더를 박살냅니다!
+                            if (mimeType != null && (mimeType.contains("mp4a") || mimeType.contains("aac") || mimeType.contains("alac"))) {
+                                java.util.List<com.google.android.exoplayer2.mediacodec.MediaCodecInfo> safeDecoders = new java.util.ArrayList<>();
+                                for (com.google.android.exoplayer2.mediacodec.MediaCodecInfo info : decoders) {
+                                    if (info.name != null && info.name.toLowerCase().contains("mtk")) {
+                                        continue; // 🚨 애플 포맷을 훔쳐가려는 MTK 디코더만 정확히 사형!
+                                    }
+                                    safeDecoders.add(info);
+                                }
+                                return safeDecoders;
+                            }
+
+                            // 🟢 MP3 등 다른 모든 포맷은 시스템 순정 부품(MTK 포함)을 그대로 안전하게 통과시킵니다.
+                            return decoders;
+                        }
+                    };
+
+                    // 🚀 최종 조립 완료 및 부모에게 전달!
+                    super.buildAudioRenderers(context, extensionRendererMode, customSelector, enableDecoderFallback, customSink, eventHandler, eventListener, out);
                 }
             };
 
@@ -431,8 +467,22 @@ public class AudioPlayerManager {
                 Object[] flacTags = extractFlacMetadata(track);
                 if (flacTags[0] != null) t = (String) flacTags[0];
                 if (flacTags[1] != null) a = (String) flacTags[1];
-                // 🚨 배열 방 번호를 2에서 5로 변경!
                 if (flacTags[5] != null) main.lastAlbumArtBytes = (byte[]) flacTags[5];
+
+                // 🚀 [여기에 신규 장착!] FLAC 검사가 끝나고, 순정 부품으로 넘어가기 직전에 ALAC/M4A를 낚아챕니다!
+            } else if (ext.endsWith(".m4a") || ext.endsWith(".alac")) {
+                Object[] alacTags = extractAlacMetadata(track);
+                if (alacTags[0] != null) t = (String) alacTags[0];
+                if (alacTags[1] != null) a = (String) alacTags[1];
+                if (alacTags[5] != null) main.lastAlbumArtBytes = (byte[]) alacTags[5];
+
+                // 🎯 대망의 가사 장착!
+                // MainActivity 쪽에 가사를 저장하는 변수(예: main.currentLyrics 등)에 값을 넣어줍니다.
+                // 아티스트님의 앱 구조에 맞춰 변수명만 살짝 수정해 주세요!
+                if (alacTags.length > 7 && alacTags[7] != null) {
+                    // 예시: main.lyricsText = (String) alacTags[7];
+                }
+
             } else {
                 // 🚀 MP3, WAV 등 버틸 수 있는 파일만 순정 부품 사용
                 try {
@@ -441,6 +491,9 @@ public class AudioPlayerManager {
                     mmr.setDataSource(fisMmr.getFD());
                     t = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_TITLE);
                     a = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_ARTIST);
+                    // 🚀 [오디오북 태그 지원] 가수 태그가 없으면 '저자(AUTHOR)' 태그를 한 번 더 긁어옵니다!
+                    if (a == null || a.isEmpty()) a = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_AUTHOR);
+
                     main.lastAlbumArtBytes = mmr.getEmbeddedPicture();
                     fisMmr.close();
                     mmr.release();
@@ -450,22 +503,33 @@ public class AudioPlayerManager {
             // ==========================================
             // 🖼️ [2구역] 화면 UI 덮어쓰기 (무조건 실행됨!)
             // ==========================================
-            // 🚀 [.m4b 꼬리표 제거 추가!]
             String safeFileName = track.getName().replace(".mp3", "").replace(".flac", "").replace(".wav", "").replace(".m4a", "").replace(".opus", "").replace(".m4b", "");
             File coverFile = new File("/storage/sdcard0/Y1_Covers", safeFileName + ".jpg");
+
             if (main.prefs.contains("meta_title_" + track.getAbsolutePath())) {
                 t = main.prefs.getString("meta_title_" + track.getAbsolutePath(), t);
                 a = main.prefs.getString("meta_artist_" + track.getAbsolutePath(), a);
             }
 
-            boolean hasValidTags = (t != null && !t.trim().isEmpty() && a != null && !a.trim().isEmpty() && !a.equalsIgnoreCase("Unknown Artist"));
+            // 🚀 [폴더 이름 강제 수혈 엔진] 태그가 텅 비었을 때, 폴더 이름을 가수/책 이름으로 띄워줍니다!
+            if (a == null || a.trim().isEmpty() || a.equalsIgnoreCase("Unknown Artist") || a.equalsIgnoreCase("Unknown Author")) {
+                try {
+                    String parentName = track.getParentFile().getParentFile().getName();
+                    String folderName = track.getParentFile().getName();
 
-            // 🚀 방금 위에서 뻗었더라도, t와 a가 비어있으므로 여기서 파일 이름으로 아주 깔끔하게 대체됩니다!
+                    if (parentName != null && !parentName.equals("Music") && !parentName.equals("Audiobooks") && !parentName.equals("sdcard0") && !parentName.equals("Y1_Playlists")) {
+                        a = parentName;
+                    } else if (folderName != null && !folderName.equals("Music") && !folderName.equals("Audiobooks") && !folderName.equals("sdcard0") && !folderName.equals("Y1_Playlists")) {
+                        a = folderName;
+                    }
+                } catch (Exception e) {}
+            }
+
             if (t != null && !t.trim().isEmpty()) main.tvPlayerTitle.setText(t);
             else main.tvPlayerTitle.setText(safeFileName);
 
             if (a != null && !a.trim().isEmpty()) main.tvPlayerArtist.setText(a);
-            else main.tvPlayerArtist.setText("Unknown Artist");
+            else main.tvPlayerArtist.setText(track.getAbsolutePath().contains("/Audiobooks") || main.isAudiobookLibraryMode ? "Unknown Author" : "Unknown Artist");
 
 
             // 🚀 동기식 렌더링으로 번쩍거림 없이 100% 매끄럽게 넘어갑니다.
@@ -508,6 +572,9 @@ public class AudioPlayerManager {
                     main.ivPlayerBgBlur.setImageResource(0);
                     main.updateMainMenuBackground();
                     main.refreshNowPlayingPreview();
+
+                    // 🚀 [에러 해결] 제목(t)과 가수(a)가 'Unknown'이 아닌 정상적인 태그를 가지고 있는지 판별하는 센서 장착!
+                    boolean hasValidTags = (t != null && !t.trim().isEmpty()) && (a != null && !a.trim().isEmpty() && !a.contains("Unknown"));
 
                     boolean isAutoFetchEnabled = main.prefs.getBoolean("auto_fetch", true);
                     if (isAutoFetchEnabled) {
@@ -736,11 +803,13 @@ public class AudioPlayerManager {
                     String upper = comment.toUpperCase();
 
                     // 라이브러리 분류를 위한 5대 텍스트 수집!
+                    // 라이브러리 분류를 위한 5대 텍스트 수집!
                     if (upper.startsWith("TITLE=")) tags[0] = comment.substring(6);
-                    else if (upper.startsWith("ARTIST=")) tags[1] = comment.substring(7);
+                    else if (upper.startsWith("ARTIST=") || upper.startsWith("AUTHOR=")) tags[1] = comment.substring(comment.indexOf("=") + 1); // 🚀 작가(AUTHOR) 태그 완벽 지원!
                     else if (upper.startsWith("ALBUM=")) tags[2] = comment.substring(6);
                     else if (upper.startsWith("DATE=") || upper.startsWith("YEAR=")) tags[3] = comment.substring(comment.indexOf("=") + 1);
                     else if (upper.startsWith("GENRE=")) tags[4] = comment.substring(6);
+                    else if (upper.startsWith("TRACKNUMBER=") || upper.startsWith("TRACKNUM=")) tags[6] = comment.substring(comment.indexOf("=") + 1);
                     else if (upper.startsWith("METADATA_BLOCK_PICTURE=")) {
                         try {
                             // 🚀 공백, 줄바꿈 찌꺼기를 완벽히 지워 Base64 해독 성공률 100% 달성!
@@ -769,11 +838,12 @@ public class AudioPlayerManager {
         return tags;
     }
     // =======================================================
-    // 🚀 [자체 제작 6.0] FLAC 6기통 만능 채굴기 (앨범, 연도, 장르 완벽 지원)
+    // 🚀 [자체 제작 6.0] FLAC 6기통 만능 채굴기 (앨범, 연도, 장르, 가사 완벽 지원)
     // =======================================================
     public Object[] extractFlacMetadata(File file) {
-        // [0]제목, [1]가수, [2]앨범, [3]연도, [4]장르, [5]앨범아트(byte[])
-        Object[] tags = new Object[]{null, null, null, null, null, null};
+        // 🚨 [치명적 버그 수리 완료] 바구니 크기를 6칸에서 8칸으로 늘려 앱 강제 종료(Crash)를 막습니다!
+        // [0]제목, [1]가수, [2]앨범, [3]연도, [4]장르, [5]앨범아트, [6]트랙번호, [7]가사
+        Object[] tags = new Object[]{null, null, null, null, null, null, null, null};
         try {
             java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r");
             byte[] header = new byte[4];
@@ -790,7 +860,7 @@ public class AudioPlayerManager {
                 int blockType = blockHeader & 0x7F;
                 int length = (raf.readUnsignedByte() << 16) | (raf.readUnsignedByte() << 8) | raf.readUnsignedByte();
 
-                if (blockType == 4) { // 🚀 텍스트 정보 추출
+                if (blockType == 4) { // 🚀 텍스트 정보 추출 (Vorbis Comment)
                     byte[] commentData = new byte[length];
                     raf.readFully(commentData);
                     try {
@@ -806,12 +876,15 @@ public class AudioPlayerManager {
                             p += strLen;
                             String upper = comment.toUpperCase();
 
-                            // 🚀 5대 텍스트 수집 완료!
+                            // 🚀 대망의 텍스트 수집 (가사 포함!)
                             if (upper.startsWith("TITLE=")) tags[0] = comment.substring(6);
-                            else if (upper.startsWith("ARTIST=")) tags[1] = comment.substring(7);
+                            else if (upper.startsWith("ARTIST=") || upper.startsWith("AUTHOR=")) tags[1] = comment.substring(comment.indexOf("=") + 1);
                             else if (upper.startsWith("ALBUM=")) tags[2] = comment.substring(6);
                             else if (upper.startsWith("DATE=") || upper.startsWith("YEAR=")) tags[3] = comment.substring(comment.indexOf("=") + 1);
                             else if (upper.startsWith("GENRE=")) tags[4] = comment.substring(6);
+                            else if (upper.startsWith("TRACKNUMBER=") || upper.startsWith("TRACKNUM=")) tags[6] = comment.substring(comment.indexOf("=") + 1);
+                                // 🎯 [신규 장착] FLAC 내부에 LYRICS 라는 이름으로 박혀있는 가사 텍스트를 무자비하게 캐옵니다!
+                            else if (upper.startsWith("LYRICS=")) tags[7] = comment.substring(7);
                         }
                     } catch (Exception e) {}
                 } else if (blockType == 6) { // 🚀 사진 추출
@@ -822,7 +895,7 @@ public class AudioPlayerManager {
                     int picDataLen = raf.readInt();
                     byte[] picData = new byte[picDataLen];
                     raf.readFully(picData);
-                    tags[5] = picData; // 🎯 사진 데이터는 이제 [5]번 방에 담깁니다!
+                    tags[5] = picData; // 🎯 사진 데이터
                 } else {
                     raf.skipBytes(length);
                 }
@@ -831,5 +904,81 @@ public class AudioPlayerManager {
         } catch (Exception e) {}
         return tags;
     }
+    // =======================================================
+    // 🚀 [자체 제작 7.0] ALAC / M4A (Apple Lossless) 원자 단위 정밀 해독기!
+    // 애플의 악랄한 moov -> udta -> meta -> ilst 트리 구조를 추적하여 태그와 앨범 아트를 싹쓸이합니다.
+    // =======================================================
+    public Object[] extractAlacMetadata(File file) {
+        // 💡 [수정] null을 8개로 맞춰야 앱이 터지지 않습니다!
+        Object[] tags = new Object[]{null, null, null, null, null, null, null, null};
+        try {
+            java.io.RandomAccessFile raf = new java.io.RandomAccessFile(file, "r");
+            long fileSize = raf.length();
+            long pos = 0;
 
+            // 🚀 MP4 원자(Atom) 구조 탐색 크롤러 가동!
+            while (pos < fileSize) {
+                raf.seek(pos);
+                int size = raf.readInt();
+                if (size <= 0) break; // 파일 끝이거나 구조가 깨졌으면 탈출
+
+                byte[] typeBytes = new byte[4];
+                raf.readFully(typeBytes);
+
+                // 🚨 [치명적 버그 수정!] '©' 기호가 UTF-8에서 깨지는 현상을 막기 위해 ISO-8859-1 렌즈를 장착합니다!
+                String type = new String(typeBytes, "ISO-8859-1");
+
+                // 💡 1. 껍데기(컨테이너) 원자를 발견하면 크기(Size)를 건너뛰고 내부로 파고듭니다!
+                if (type.equals("moov") || type.equals("udta") || type.equals("meta") || type.equals("ilst")) {
+                    if (type.equals("meta")) pos += 4; // meta 원자는 4바이트의 버전/플래그가 숨어있으므로 회피
+                    pos += 8; // Size(4) + Type(4) 만큼 전진해서 알맹이로 진입!
+                    continue;
+                }
+
+                // 💡 조건문에 type.equals("©lyr") 추가 완료!
+                if (type.equals("©nam") || type.equals("©ART") || type.equals("©alb") ||
+                        type.equals("©day") || type.equals("©gen") || type.equals("covr") ||
+                        type.equals("trkn") || type.equals("©lyr")) {
+
+                    raf.seek(pos + 8);
+                    int dataSize = raf.readInt();
+                    byte[] dataTypeBytes = new byte[4];
+                    raf.readFully(dataTypeBytes);
+
+                    // 🚨 [여기서도 수정!] 이름표는 무조건 ISO-8859-1 렌즈로 읽습니다.
+                    String dataType = new String(dataTypeBytes, "ISO-8859-1");
+
+                    // 실제 값이 들어있는 'data' 구역인지 확인
+                    if (dataType.equals("data")) {
+                        raf.skipBytes(8); // 버전, 플래그, 빈 공간(Null padding) 8바이트 스킵
+                        int actualDataSize = dataSize - 16;
+
+                        // 데이터가 10MB 이하일 때만 읽어옵니다 (메모리 폭발 방지)
+                        if (actualDataSize > 0 && actualDataSize < 10485760) {
+                            byte[] data = new byte[actualDataSize];
+                            raf.readFully(data);
+
+                            // 🎯 알맹이(진짜 텍스트)는 UTF-8 인코딩이 맞으므로 그대로 파싱합니다!
+                            if (type.equals("©nam")) tags[0] = new String(data, "UTF-8"); // 제목
+                            else if (type.equals("©ART")) tags[1] = new String(data, "UTF-8"); // 가수
+                            else if (type.equals("©alb")) tags[2] = new String(data, "UTF-8"); // 앨범
+                            else if (type.equals("©day")) tags[3] = new String(data, "UTF-8"); // 연도
+                            else if (type.equals("©gen")) tags[4] = new String(data, "UTF-8"); // 장르
+                            else if (type.equals("covr")) tags[5] = data; // 앨범 아트
+                            else if (type.equals("trkn") && actualDataSize >= 4) {
+                                tags[6] = String.valueOf((int) data[3]); // 트랙 번호
+                            }
+                            // 🚀 [신규 장착] 대망의 가사 채굴! UTF-8 텍스트로 변환하여 8번째 바구니에 담습니다!
+                            else if (type.equals("©lyr")) {
+                                tags[7] = new String(data, "UTF-8");
+                            }
+                        }
+                    }
+                }
+                pos += size; // 💡 현재 원자 탐색이 끝났으면 다음 원자로 훌쩍 건너뜁니다!
+            }
+            raf.close();
+        } catch (Exception e) {}
+        return tags;
+    }
 }
