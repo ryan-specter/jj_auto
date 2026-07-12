@@ -2,6 +2,7 @@ package com.themoon.y1;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.DownloadManager;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothProfile;
@@ -15,6 +16,9 @@ import android.content.SharedPreferences;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 
+import android.graphics.Typeface;
+import android.graphics.drawable.ColorDrawable;
+import android.graphics.drawable.GradientDrawable;
 import android.media.AudioManager;
 import android.media.MediaMetadataRetriever;
 import android.media.MediaPlayer;
@@ -26,29 +30,42 @@ import android.net.wifi.WifiConfiguration;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.BatteryManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.PowerManager;
 import android.os.Vibrator;
 import android.provider.Settings;
+import android.util.LruCache;
+import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ListView;
 import android.widget.ProgressBar;
+import android.widget.RelativeLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 import java.io.File;
+import java.io.FileOutputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.lang.reflect.Method;
+import java.security.Security;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 
 import android.renderscript.Allocation;
 import android.renderscript.Element;
@@ -57,6 +74,7 @@ import android.renderscript.ScriptIntrinsicBlur;
 
 import com.themoon.y1.adapters.CategoryListAdapter;
 import com.themoon.y1.adapters.SongListAdapter;
+import com.themoon.y1.managers.LanguageManager;
 import com.themoon.y1.models.SongItem;
 import com.themoon.y1.views.AudioVisualizerView;
 import com.themoon.y1.views.BatteryIconView;
@@ -65,6 +83,8 @@ import com.themoon.y1.views.CustomAnalogClockView;
 import com.themoon.y1.views.EqSliderView;
 import com.themoon.y1.views.PieChartView;
 import com.themoon.y1.views.WidgetBatteryBarView;
+
+import org.conscrypt.Conscrypt;
 
 public class MainActivity extends Activity {
     // 주의: 주소 맨 끝에 반드시 슬래시(/)를 붙여주세요!
@@ -277,7 +297,9 @@ public class MainActivity extends Activity {
     public String virtualQueryValue = "";
     public List<File> virtualSongList = new ArrayList<>();
     // 💡 백그라운드 미디어 제어권(스크린 오프) 변수
-
+// 🚀 [팟캐스트 전용] 다운로드 고유 ID와 진행률(%)을 실시간으로 추적하는 지능형 메모장
+    public java.util.HashMap<String, Long> activePodcastDownloads = new java.util.HashMap<>();
+    public java.util.HashMap<String, Integer> podcastDownloadProgress = new java.util.HashMap<>();
     private ImageView ivStatusPlay;
     private ImageView ivStatusServer; // 🚀 [신규 추가] 상태바 웹 서버 아이콘
 
@@ -291,6 +313,11 @@ public class MainActivity extends Activity {
     private static final int BROWSER_YEARS = 10;
     private static final int BROWSER_GENRES = 11;
     private static final int BROWSER_RECENTLY_ADDED = 12; // 🚀 [신규 장착] 최근 추가된 곡 상태
+    // 🚀 [팟캐스트 엔진] 전용 상태 변수 추가!
+    private static final int BROWSER_PODCAST_CHANNELS = 13;
+    private static final int BROWSER_PODCAST_EPISODES = 14;
+    private String currentPodcastUrl = ""; // 현재 선택한 팟캐스트 통신망 주소
+
     // 🚀 [신규 추가] 커버 플로우 상태 상수 및 데이터 저장소
     // private static final int BROWSER_COVER_FLOW = 9;
     // private java.util.List<SongItem> uniqueAlbumList = new
@@ -369,6 +396,9 @@ public class MainActivity extends Activity {
     private TextView tvKeyboardSsid, tvKeyboardInput;
     private TextView tvKeyPprev, tvKeyPrev, tvKeyCurrent, tvKeyNext, tvKeyNnext;
     private long lastBtToggleTime = 0;
+
+    public int currentKeyboardMode = 0;
+
     private final String[] KEYBOARD_CHARS = {
             "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u",
             "v", "w", "x", "y", "z",
@@ -376,7 +406,7 @@ public class MainActivity extends Activity {
             "V", "W", "X", "Y", "Z",
             "0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
             "!", "@", "#", "$", "%", "^", "&", "*", "-", "_", "+", "=", ".", "?",
-            "[DEL]", "[CONN]"
+            "[SPACE]", "[DEL]", "[CONN]"
     };
 
     private android.media.RemoteControlClient remoteControlClient;
@@ -953,6 +983,12 @@ public class MainActivity extends Activity {
                 isMediaScanning = false;
 
             }
+            // 🚀 [여기에 신규 추가!] 다운로드가 끝나면 리스트를 새로고침하여 '✔' 아이콘을 띄웁니다!
+            else if (android.app.DownloadManager.ACTION_DOWNLOAD_COMPLETE.equals(action)) {
+                if (currentBrowserMode == BROWSER_PODCAST_EPISODES && listVirtualSongs != null && listVirtualSongs.getAdapter() != null) {
+                    ((android.widget.BaseAdapter) listVirtualSongs.getAdapter()).notifyDataSetChanged();
+                }
+            }
         }
     };
 
@@ -1171,6 +1207,12 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+
+        try {
+            Security.insertProviderAt(Conscrypt.newProvider(), 1);
+        } catch (Throwable e) {
+            e.printStackTrace();
+        }
         super.onCreate(savedInstanceState);
         // 🚀 앱이 켜지면 자기 자신을 변수에 등록합니다.
         instance = this;
@@ -1178,11 +1220,11 @@ public class MainActivity extends Activity {
         final int maxMemory = (int) (Runtime.getRuntime().maxMemory() / 1024);
         final int cacheSize = maxMemory / 8; // (예: 16MB 할당)
 
-        albumArtCache = new android.util.LruCache<String, android.graphics.Bitmap>(cacheSize) {
+        albumArtCache = new LruCache<String, Bitmap>(cacheSize) {
             @Override
-            protected int sizeOf(String key, android.graphics.Bitmap bitmap) {
+            protected int sizeOf(String key, Bitmap bitmap) {
                 // 비트맵이 램(RAM)에서 차지하는 실제 용량(KB)을 계산하여 금고 용량을 관리합니다.
-                if (android.os.Build.VERSION.SDK_INT >= 12) {
+                if (Build.VERSION.SDK_INT >= 12) {
                     return bitmap.getByteCount() / 1024;
                 }
                 return (bitmap.getRowBytes() * bitmap.getHeight()) / 1024;
@@ -1193,12 +1235,12 @@ public class MainActivity extends Activity {
             @Override
             public void uncaughtException(Thread thread, Throwable e) {
                 try {
-                    java.io.StringWriter sw = new java.io.StringWriter();
-                    java.io.PrintWriter pw = new java.io.PrintWriter(sw);
+                    StringWriter sw = new StringWriter();
+                    PrintWriter pw = new PrintWriter(sw);
                     e.printStackTrace(pw);
-                    java.io.File logFile = new java.io.File("/storage/sdcard0/y1_crash_log.txt");
-                    java.io.FileOutputStream fos = new java.io.FileOutputStream(logFile, true);
-                    fos.write(("\n\n--- 💥 CRASH REPORT (" + new java.util.Date().toString() + ") ---\n").getBytes());
+                    File logFile = new File("/storage/sdcard0/y1_crash_log.txt");
+                    FileOutputStream fos = new FileOutputStream(logFile, true);
+                    fos.write(("\n\n--- 💥 CRASH REPORT (" + new Date().toString() + ") ---\n").getBytes());
                     fos.write(sw.toString().getBytes());
                     fos.close();
                 } catch (Exception ex) {
@@ -1208,29 +1250,29 @@ public class MainActivity extends Activity {
         });
         // 🚀 [추가] A2DP 오디오 통제권을 미리 확보해 둡니다.
         BluetoothAdapter.getDefaultAdapter().getProfileProxy(this,
-                new android.bluetooth.BluetoothProfile.ServiceListener() {
+                new BluetoothProfile.ServiceListener() {
                     @Override
-                    public void onServiceConnected(int profile, android.bluetooth.BluetoothProfile proxy) {
-                        if (profile == android.bluetooth.BluetoothProfile.A2DP) {
+                    public void onServiceConnected(int profile, BluetoothProfile proxy) {
+                        if (profile == BluetoothProfile.A2DP) {
                             globalA2dp = proxy; // 장전 완료!
                         }
                     }
 
                     @Override
                     public void onServiceDisconnected(int profile) {
-                        if (profile == android.bluetooth.BluetoothProfile.A2DP)
+                        if (profile == BluetoothProfile.A2DP)
                             globalA2dp = null;
                     }
-                }, android.bluetooth.BluetoothProfile.A2DP);
+                }, BluetoothProfile.A2DP);
         requestWindowFeature(Window.FEATURE_NO_TITLE);
         getWindow().setFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN, WindowManager.LayoutParams.FLAG_FULLSCREEN);
         setContentView(R.layout.activity_main);
 
         // 🚀 [수정 완료] 기존 로딩 오버레이 코드를 아래 내용으로 통째로 덮어씌우세요!
-        android.view.ViewGroup root = findViewById(android.R.id.content);
+        ViewGroup root = findViewById(android.R.id.content);
         layoutLoadingOverlay = new LinearLayout(this);
         layoutLoadingOverlay.setOrientation(LinearLayout.VERTICAL);
-        layoutLoadingOverlay.setGravity(android.view.Gravity.CENTER);
+        layoutLoadingOverlay.setGravity(Gravity.CENTER);
         layoutLoadingOverlay.setBackgroundColor(0xDD000000);
         layoutLoadingOverlay.setClickable(true);
         layoutLoadingOverlay.setFocusable(true);
@@ -1239,7 +1281,7 @@ public class MainActivity extends Activity {
         // 1. 빙글빙글 스피너 대신, 쫙 차오르는 가로형 프로그레스 바(ProgressBar) 적용!
         pbLoadingProgress = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         pbLoadingProgress.setMax(100);
-        android.widget.LinearLayout.LayoutParams pbLp = new android.widget.LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams pbLp = new LinearLayout.LayoutParams(
                 (int) (250 * getResources().getDisplayMetrics().density),
                 (int) (20 * getResources().getDisplayMetrics().density));
         layoutLoadingOverlay.addView(pbLoadingProgress, pbLp);
@@ -1249,24 +1291,24 @@ public class MainActivity extends Activity {
         tvLoadingProgress.setText(t("Preparing to scan...\nPlease wait."));
         tvLoadingProgress.setTextColor(0xFFFFFFFF);
         tvLoadingProgress.setTextSize(18);
-        tvLoadingProgress.setGravity(android.view.Gravity.CENTER);
+        tvLoadingProgress.setGravity(Gravity.CENTER);
         tvLoadingProgress.setPadding(0, 30, 0, 0);
         layoutLoadingOverlay.addView(tvLoadingProgress);
 
-        root.addView(layoutLoadingOverlay, new android.view.ViewGroup.LayoutParams(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT));
+        root.addView(layoutLoadingOverlay, new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT));
         // 🚀 [여기까지 추가 끝!]
         tvFastScrollLetter = new TextView(this);
         tvFastScrollLetter.setTextSize(50); // 글자 크기를 아주 큼직하게!
-        tvFastScrollLetter.setGravity(android.view.Gravity.CENTER);
+        tvFastScrollLetter.setGravity(Gravity.CENTER);
         tvFastScrollLetter.setVisibility(View.GONE);
 
-        android.widget.FrameLayout.LayoutParams flp = new android.widget.FrameLayout.LayoutParams(
+        FrameLayout.LayoutParams flp = new FrameLayout.LayoutParams(
                 (int) (80 * getResources().getDisplayMetrics().density), // 가로 80dp
                 (int) (80 * getResources().getDisplayMetrics().density) // 세로 80dp
         );
-        flp.gravity = android.view.Gravity.CENTER_VERTICAL | android.view.Gravity.RIGHT; // 오른쪽 가운데 정렬
+        flp.gravity = Gravity.CENTER_VERTICAL | Gravity.RIGHT; // 오른쪽 가운데 정렬
         flp.rightMargin = (int) (30 * getResources().getDisplayMetrics().density); // 오른쪽에서 30dp 띄움
         root.addView(tvFastScrollLetter, flp);
 
@@ -1283,7 +1325,7 @@ public class MainActivity extends Activity {
 
         // 🚀 2. 그 다음 언어 엔진을 가동하여 풀려난 파일 중 사용자가 선택한 언어를 읽어옵니다.
         String savedLang = prefs.getString("app_language", "English (Default)");
-        com.themoon.y1.managers.LanguageManager.getInstance(this).applyLanguage(savedLang);
+        LanguageManager.getInstance(this).applyLanguage(savedLang);
         // 🚀 [테마 파일 동적 로드] 기기 내부의 폴더에서 테마 파일들을 읽어옵니다!
         File themeFolder = new File("/storage/sdcard0/Y1_Themes");
 
@@ -1319,8 +1361,8 @@ public class MainActivity extends Activity {
         // (이하 블랙리스트 및 다른 설정 불러오기 코드 유지)
         // 💡 1. 블랙리스트 (안드로이드 내부 버그 방지를 위해 HashSet을 새로 감싸서 안전하게 로드)
         try {
-            java.util.Set<String> savedBlacklist = prefs.getStringSet("blacklist", new java.util.HashSet<String>());
-            blacklist = new java.util.HashSet<>(savedBlacklist);
+            Set<String> savedBlacklist = prefs.getStringSet("blacklist", new HashSet<String>());
+            blacklist = new HashSet<>(savedBlacklist);
 
             String poisonFile = prefs.getString("last_attempted_file", null);
             if (poisonFile != null) {
@@ -1448,23 +1490,23 @@ public class MainActivity extends Activity {
         containerBrowserItems = findViewById(R.id.container_browser_items);
 
         scrollViewBrowser = (View) containerBrowserItems.getParent();
-        listVirtualSongs = new android.widget.ListView(this);
+        listVirtualSongs = new ListView(this);
 
         // 🚀 [간격 복구] 투명한 구분선(Divider)으로 설정 메뉴와 똑같은 '4dp' 간격을 만들어줍니다!
-        listVirtualSongs.setDivider(new android.graphics.drawable.ColorDrawable(0x00000000));
+        listVirtualSongs.setDivider(new ColorDrawable(0x00000000));
         listVirtualSongs.setDividerHeight((int) (4 * getResources().getDisplayMetrics().density));
 
-        listVirtualSongs.setSelector(new android.graphics.drawable.ColorDrawable(0));
+        listVirtualSongs.setSelector(new ColorDrawable(0));
         listVirtualSongs.setItemsCanFocus(true);
         listVirtualSongs.setSoundEffectsEnabled(false);
         listVirtualSongs.setVisibility(View.GONE); // 평소엔 숨겨둡니다.
 
-        android.view.ViewGroup browserParent = (android.view.ViewGroup) scrollViewBrowser.getParent();
+        ViewGroup browserParent = (ViewGroup) scrollViewBrowser.getParent();
 
         // 🚀 [겹침 완벽 해결] 기존 XML에 설계되어 있던 ScrollView의 '위치 규칙(LayoutParams)'을 그대로 복사해서 새
         // ListView에 똑같이 입혀줍니다!
         // 이렇게 하면 다른 화면들과 100% 동일하게 헤더 텍스트 아래에 딱 맞춰서 렌더링됩니다.
-        android.view.ViewGroup.LayoutParams originalLp = scrollViewBrowser.getLayoutParams();
+        ViewGroup.LayoutParams originalLp = scrollViewBrowser.getLayoutParams();
         browserParent.addView(listVirtualSongs, originalLp);
         layoutVolumeOverlay = findViewById(R.id.layout_volume_overlay);
         volumeProgress = findViewById(R.id.volume_progress);
@@ -1519,17 +1561,17 @@ public class MainActivity extends Activity {
         btnServerToggle = findViewById(R.id.btn_server_toggle);
         try {
             // 1. Settings (세팅 메뉴)
-            ((TextView) ((android.view.ViewGroup) layoutSettingsMode).getChildAt(0)).setText(t("Settings"));
+            ((TextView) ((ViewGroup) layoutSettingsMode).getChildAt(0)).setText(t("Settings"));
             // 2. Bluetooth (블루투스)
-            ((TextView) ((android.view.ViewGroup) layoutBluetoothMode).getChildAt(0)).setText(t("Bluetooth"));
+            ((TextView) ((ViewGroup) layoutBluetoothMode).getChildAt(0)).setText(t("Bluetooth"));
             // 3. Wi-Fi (와이파이)
-            ((TextView) ((android.view.ViewGroup) layoutWifiMode).getChildAt(0)).setText(t("Wi-Fi"));
+            ((TextView) ((ViewGroup) layoutWifiMode).getChildAt(0)).setText(t("Wi-Fi"));
             // 4. Brightness (화면 밝기)
-            ((TextView) ((android.view.ViewGroup) layoutBrightnessMode).getChildAt(0)).setText(t("Display Brightness"));
+            ((TextView) ((ViewGroup) layoutBrightnessMode).getChildAt(0)).setText(t("Display Brightness"));
             // 5. Storage (저장소)
-            ((TextView) ((android.view.ViewGroup) layoutStorageMode).getChildAt(0)).setText(t("Storage"));
+            ((TextView) ((ViewGroup) layoutStorageMode).getChildAt(0)).setText(t("Storage"));
             // 6. Web Server (웹 서버)
-            ((TextView) ((android.view.ViewGroup) layoutWebServerMode).getChildAt(0)).setText(t("Wireless PC Upload"));
+            ((TextView) ((ViewGroup) layoutWebServerMode).getChildAt(0)).setText(t("Wireless PC Upload"));
         } catch (Exception e) {
             // 레이아웃 구조가 달라도 앱이 터지지 않도록 보호
         }
@@ -1537,9 +1579,9 @@ public class MainActivity extends Activity {
         float dt = getResources().getDisplayMetrics().density;
 
         try {
-            android.view.ViewGroup webLayout = (android.view.ViewGroup) layoutWebServerMode;
+            ViewGroup webLayout = (ViewGroup) layoutWebServerMode;
             // 레이아웃의 맨 첫 번째(인덱스 0) 요소가 보통 제목 텍스트입니다.
-            android.widget.TextView tvHeader = (android.widget.TextView) webLayout.getChildAt(0);
+            TextView tvHeader = (TextView) webLayout.getChildAt(0);
 
             // 💡 원하시는 제목으로 마음껏 바꿔주세요!
             // tvHeader.setText("Wireless PC Upload");
@@ -1573,12 +1615,12 @@ public class MainActivity extends Activity {
                     // 🚀 휠이 올라갔을 때: 확실한 우유빛 배경과 검은색 굵은(Bold) 글씨로 반전!
                     btnServerToggle.setBackgroundColor(0xDDFFFFFF);
                     btnServerToggle.setTextColor(0xFF000000);
-                    btnServerToggle.setTypeface(null, android.graphics.Typeface.BOLD);
+                    btnServerToggle.setTypeface(null, Typeface.BOLD);
                 } else {
                     // 🚀 휠이 벗어났을 때: 다시 은은한 반투명 유리창과 얇은 흰색 글씨로 복귀!
                     btnServerToggle.setBackgroundColor(0x15FFFFFF);
                     btnServerToggle.setTextColor(0xFFFFFFFF);
-                    btnServerToggle.setTypeface(null, android.graphics.Typeface.NORMAL);
+                    btnServerToggle.setTypeface(null, Typeface.NORMAL);
                 }
             }
         });
@@ -1598,14 +1640,14 @@ public class MainActivity extends Activity {
         // 🚀 [여기에 새로 추가!] 기존 배터리 숫자(텍스트)를 숨기고 그 자리에 플랫 아이콘을 끼워 넣습니다.
         tvStatusBattery.setVisibility(View.GONE);
         batteryIconView = new BatteryIconView(this);
-        android.view.ViewGroup statusParent = (android.view.ViewGroup) tvStatusBattery.getParent();
+        ViewGroup statusParent = (ViewGroup) tvStatusBattery.getParent();
         int bIdx = statusParent.indexOfChild(tvStatusBattery);
 
         float density = getResources().getDisplayMetrics().density;
         // 🚀 [크기 폭업] 가로 54dp, 세로 24dp로 훨씬 더 크고 시원하게 키웁니다!
-        android.widget.LinearLayout.LayoutParams blp = new android.widget.LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(
                 (int) (54 * density), (int) (24 * density));
-        blp.gravity = android.view.Gravity.CENTER_VERTICAL;
+        blp.gravity = Gravity.CENTER_VERTICAL;
         blp.setMargins((int) (15 * density), 0, (int) (6 * density), 0); // 커진 만큼 마진도 살짝 조정
         statusParent.addView(batteryIconView, bIdx, blp);
         ivStatusBluetooth = findViewById(R.id.iv_status_bluetooth);
@@ -1618,13 +1660,13 @@ public class MainActivity extends Activity {
         ivStatusPlay.setVisibility(View.GONE);
 
         // 1. 시계 부모가 아니라, 우측 블루투스/와이파이가 모여있는 'LinearLayout'을 콕 집어옵니다.
-        android.view.ViewGroup rightStatusGroup = (android.view.ViewGroup) ivStatusBluetooth.getParent();
+        ViewGroup rightStatusGroup = (ViewGroup) ivStatusBluetooth.getParent();
         float statusDensity = getResources().getDisplayMetrics().density;
 
         // 2. 아이콘 크기를 우측 아이콘들과 완벽하게 동일한 22dp로 맞춥니다.
-        android.widget.LinearLayout.LayoutParams playLp = new android.widget.LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams playLp = new LinearLayout.LayoutParams(
                 (int) (22 * statusDensity), (int) (22 * statusDensity));
-        playLp.gravity = android.view.Gravity.CENTER_VERTICAL;
+        playLp.gravity = Gravity.CENTER_VERTICAL;
         playLp.setMargins(0, 0, (int) (8 * statusDensity), 0); // 우측 아이콘과의 간격 8dp
 
         // 3. 우측 아이콘 그룹의 맨 앞(인덱스 0)에 쏙 끼워 넣습니다!
@@ -1641,9 +1683,9 @@ public class MainActivity extends Activity {
         ivStatusServer.setColorFilter(0xFFFFFFFF); // 깔끔한 순백색으로 도색!
         ivStatusServer.setVisibility(View.GONE); // 평소엔 끄기
 
-        android.widget.LinearLayout.LayoutParams serverLp = new android.widget.LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams serverLp = new LinearLayout.LayoutParams(
                 (int) (22 * statusDensity), (int) (22 * statusDensity));
-        serverLp.gravity = android.view.Gravity.CENTER_VERTICAL;
+        serverLp.gravity = Gravity.CENTER_VERTICAL;
         serverLp.setMargins(0, 0, (int) (8 * statusDensity), 0); // 우측 아이콘과의 간격 8dp
 
         rightStatusGroup.addView(ivStatusServer, 0, serverLp); // 재생 아이콘 옆에 나란히 배치!
@@ -1670,7 +1712,7 @@ public class MainActivity extends Activity {
         btnSettings = findViewById(R.id.btn_settings);
         btnBluetooth = findViewById(R.id.btn_bluetooth);
         btnRadio = findViewById(R.id.btn_radio);
-        ((android.view.View) btnRadio.getParent()).setVisibility(View.VISIBLE);
+        ((View) btnRadio.getParent()).setVisibility(View.VISIBLE);
         Button btnWebServer = findViewById(R.id.btn_webserver);
         tvPlayerTitle = findViewById(R.id.tv_player_title);
         tvPlayerArtist = findViewById(R.id.tv_player_artist);
@@ -1688,40 +1730,40 @@ public class MainActivity extends Activity {
         ivPlayerRepeatStatus = findViewById(R.id.iv_player_repeat_status);
 
         // 🚀 순정 비주얼라이저 결합 프레임 유지
-        android.widget.FrameLayout albumContainer = (android.widget.FrameLayout) ivAlbumArt.getParent();
-        android.widget.LinearLayout playerInnerLayout = (android.widget.LinearLayout) albumContainer.getParent();
+        FrameLayout albumContainer = (FrameLayout) ivAlbumArt.getParent();
+        LinearLayout playerInnerLayout = (LinearLayout) albumContainer.getParent();
 
         visualizerView = new AudioVisualizerView(this);
         visualizerView.setVisibility(View.GONE);
 
         int height190 = (int) (190 * getResources().getDisplayMetrics().density);
-        android.widget.LinearLayout.LayoutParams visLp = new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.MATCH_PARENT, height190);
+        LinearLayout.LayoutParams visLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, height190);
         visLp.setMargins(0, 0, 0, (int) (8 * getResources().getDisplayMetrics().density));
         playerInnerLayout.addView(visualizerView, 0, visLp);
         // 🚀 [가사 UI 추가] 스펙트럼과 똑같은 크기의 가사 전용 투명 스크롤 뷰를 겹쳐둡니다.
-        lyricScrollView = new android.widget.ScrollView(this);
+        lyricScrollView = new ScrollView(this);
         lyricScrollView.setVisibility(View.GONE);
         lyricScrollView.setScrollbarFadingEnabled(true);
 
         tvLyrics = new TextView(this);
         tvLyrics.setTextColor(0xFFFFFFFF);
         tvLyrics.setTextSize(16f);
-        tvLyrics.setGravity(android.view.Gravity.CENTER_HORIZONTAL | android.view.Gravity.TOP);
+        tvLyrics.setGravity(Gravity.CENTER_HORIZONTAL | Gravity.TOP);
         // ... (위쪽 가사 UI 세팅 코드 생략) ...
         tvLyrics.setLineSpacing(10f, 1.2f);
         tvLyrics.setPadding(20, 40, 20, 40);
-        tvLyrics.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.BOLD);
+        tvLyrics.setTypeface(ThemeManager.getCustomFont(), Typeface.BOLD);
 
         // 🚀 [버그 완벽 박멸] 상자 역시 무조건 위쪽(TOP)에서부터 차곡차곡 내려오도록 강제 고정합니다!
-        lyricScrollView.addView(tvLyrics, new android.widget.FrameLayout.LayoutParams(
-                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
-                android.view.ViewGroup.LayoutParams.WRAP_CONTENT,
-                android.view.Gravity.TOP | android.view.Gravity.CENTER_HORIZONTAL));
+        lyricScrollView.addView(tvLyrics, new FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP | Gravity.CENTER_HORIZONTAL));
         playerInnerLayout.addView(lyricScrollView, 0, visLp);
         // 🚀 상위 상대 레이아웃(parentRel) 획득
-        android.widget.LinearLayout statusIconsLayout = (android.widget.LinearLayout) ivPlayerShuffleStatus.getParent();
-        android.widget.RelativeLayout parentRel = (android.widget.RelativeLayout) statusIconsLayout.getParent();
+        LinearLayout statusIconsLayout = (LinearLayout) ivPlayerShuffleStatus.getParent();
+        RelativeLayout parentRel = (RelativeLayout) statusIconsLayout.getParent();
 
         // 🚀 [핵심 수정] 앨범 이미지 내부가 아니라, 플레이어 화면 전체를 쓰는 parentRel 좌측 벽면에 알약을 정렬합니다!
 
@@ -1736,11 +1778,11 @@ public class MainActivity extends Activity {
         tvQualityExt = new TextView(this);
         tvQualityExt.setTextSize(13);
         tvQualityExt.setTextColor(0xbbFFFFFF);
-        tvQualityExt.setGravity(android.view.Gravity.LEFT | android.view.Gravity.CENTER_VERTICAL);
+        tvQualityExt.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         tvQualityExt.setIncludeFontPadding(false); // 💡 글자 정중앙 정렬
         tvQualityExt.setPadding((int) (16 * density), (int) (8 * density), (int) (16 * density), (int) (8 * density));
-        tvQualityExt.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.BOLD);
-        android.graphics.drawable.GradientDrawable bgExt = new android.graphics.drawable.GradientDrawable();
+        tvQualityExt.setTypeface(ThemeManager.getCustomFont(), Typeface.BOLD);
+        GradientDrawable bgExt = new GradientDrawable();
         bgExt.setColor(capsuleBgColor);
         bgExt.setCornerRadius(capsuleRadius);
         tvQualityExt.setBackground(bgExt);
@@ -1749,12 +1791,12 @@ public class MainActivity extends Activity {
         tvQualityFormat = new TextView(this);
         tvQualityFormat.setTextSize(13);
         tvQualityFormat.setTextColor(0xbbFFFFFF);
-        tvQualityFormat.setGravity(android.view.Gravity.LEFT | android.view.Gravity.CENTER_VERTICAL);
+        tvQualityFormat.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         tvQualityFormat.setIncludeFontPadding(false);
         tvQualityFormat.setPadding((int) (16 * density), (int) (8 * density), (int) (16 * density),
                 (int) (8 * density));
-        tvQualityFormat.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.BOLD);
-        android.graphics.drawable.GradientDrawable bgFormat = new android.graphics.drawable.GradientDrawable();
+        tvQualityFormat.setTypeface(ThemeManager.getCustomFont(), Typeface.BOLD);
+        GradientDrawable bgFormat = new GradientDrawable();
         bgFormat.setColor(capsuleBgColor);
         bgFormat.setCornerRadius(capsuleRadius);
         tvQualityFormat.setBackground(bgFormat);
@@ -1763,12 +1805,12 @@ public class MainActivity extends Activity {
         tvQualityBitrate = new TextView(this);
         tvQualityBitrate.setTextSize(13);
         tvQualityBitrate.setTextColor(0xbbFFFFFF);
-        tvQualityBitrate.setGravity(android.view.Gravity.LEFT | android.view.Gravity.CENTER_VERTICAL);
+        tvQualityBitrate.setGravity(Gravity.LEFT | Gravity.CENTER_VERTICAL);
         tvQualityBitrate.setIncludeFontPadding(false);
         tvQualityBitrate.setPadding((int) (16 * density), (int) (8 * density), (int) (16 * density),
                 (int) (8 * density));
-        tvQualityBitrate.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.BOLD);
-        android.graphics.drawable.GradientDrawable bgBitrate = new android.graphics.drawable.GradientDrawable();
+        tvQualityBitrate.setTypeface(ThemeManager.getCustomFont(), Typeface.BOLD);
+        GradientDrawable bgBitrate = new GradientDrawable();
         bgBitrate.setColor(capsuleBgColor);
         bgBitrate.setCornerRadius(capsuleRadius);
         tvQualityBitrate.setBackground(bgBitrate);
@@ -1777,27 +1819,27 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams lp1 = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         lp1.bottomMargin = (int) (6 * density);
-        lp1.gravity = android.view.Gravity.LEFT;
+        lp1.gravity = Gravity.LEFT;
 
         LinearLayout.LayoutParams lp2 = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         lp2.bottomMargin = (int) (6 * density);
-        lp2.gravity = android.view.Gravity.LEFT;
+        lp2.gravity = Gravity.LEFT;
 
         LinearLayout.LayoutParams lp3 = new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp3.gravity = android.view.Gravity.LEFT;
+        lp3.gravity = Gravity.LEFT;
 
         layoutAudioQualityContainer.addView(tvQualityExt, lp1);
         layoutAudioQualityContainer.addView(tvQualityFormat, lp2);
         layoutAudioQualityContainer.addView(tvQualityBitrate, lp3);
 
         // 🚀 [위치 정밀 수정] 화면 정중앙이 아니라, 왼쪽 상단 트랙 표시(01 / 100) 바로 밑으로 배치 규칙 변경!
-        android.widget.RelativeLayout.LayoutParams containerLp = new android.widget.RelativeLayout.LayoutParams(
-                android.widget.RelativeLayout.LayoutParams.WRAP_CONTENT,
-                android.widget.RelativeLayout.LayoutParams.WRAP_CONTENT);
-        containerLp.addRule(android.widget.RelativeLayout.ALIGN_PARENT_LEFT); // 화면 왼쪽 벽에 정렬
-        containerLp.addRule(android.widget.RelativeLayout.BELOW, R.id.tv_player_track_count); // 💡 트랙 표시(01/100) 바로 밑에
+        RelativeLayout.LayoutParams containerLp = new RelativeLayout.LayoutParams(
+                RelativeLayout.LayoutParams.WRAP_CONTENT,
+                RelativeLayout.LayoutParams.WRAP_CONTENT);
+        containerLp.addRule(RelativeLayout.ALIGN_PARENT_LEFT); // 화면 왼쪽 벽에 정렬
+        containerLp.addRule(RelativeLayout.BELOW, R.id.tv_player_track_count); // 💡 트랙 표시(01/100) 바로 밑에
                                                                                               // 꽂아 넣기!
 
         // 💡 [팁] 아래 마진 값들을 조절하여 01 / 100 글자와 자로 잰 듯이 줄을 맞출 수 있습니다.
@@ -1807,17 +1849,17 @@ public class MainActivity extends Activity {
         parentRel.addView(layoutAudioQualityContainer, containerLp);
 
         // 🚀 기존에 정상 조립된 하트 및 우측 상단 아이콘 정렬 세트 유지 복원
-        android.widget.LinearLayout verticalWrapper = new android.widget.LinearLayout(this);
-        verticalWrapper.setOrientation(android.widget.LinearLayout.VERTICAL);
-        verticalWrapper.setGravity(android.view.Gravity.RIGHT);
+        LinearLayout verticalWrapper = new LinearLayout(this);
+        verticalWrapper.setOrientation(LinearLayout.VERTICAL);
+        verticalWrapper.setGravity(Gravity.RIGHT);
 
-        android.widget.RelativeLayout.LayoutParams params = (android.widget.RelativeLayout.LayoutParams) statusIconsLayout
+        RelativeLayout.LayoutParams params = (RelativeLayout.LayoutParams) statusIconsLayout
                 .getLayoutParams();
         parentRel.removeView(statusIconsLayout);
 
-        statusIconsLayout.setLayoutParams(new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT));
+        statusIconsLayout.setLayoutParams(new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT));
         verticalWrapper.addView(statusIconsLayout);
 
         tvPlayerFavoriteStatus = new TextView(this);
@@ -1825,9 +1867,9 @@ public class MainActivity extends Activity {
         tvPlayerFavoriteStatus.setTextSize(20);
         tvPlayerFavoriteStatus.setVisibility(View.GONE);
 
-        android.widget.LinearLayout.LayoutParams heartLp = new android.widget.LinearLayout.LayoutParams(
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT,
-                android.widget.LinearLayout.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams heartLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
         heartLp.topMargin = (int) (8 * density);
         heartLp.rightMargin = (int) (2 * density);
         verticalWrapper.addView(tvPlayerFavoriteStatus, heartLp);
@@ -1836,8 +1878,8 @@ public class MainActivity extends Activity {
 
         try {
             // 앱이 켜질 때 금고(SharedPreferences)에서 즐겨찾기 경로들을 싹 다 가져옵니다.
-            java.util.Set<String> savedFavs = prefs.getStringSet("favorites", new java.util.HashSet<String>());
-            favoritePaths = new java.util.HashSet<>(savedFavs);
+            Set<String> savedFavs = prefs.getStringSet("favorites", new HashSet<String>());
+            favoritePaths = new HashSet<>(savedFavs);
         } catch (Exception e) {
         }
         // 🚀🚀🚀 [추가 끝] 🚀🚀🚀
@@ -1995,6 +2037,16 @@ public class MainActivity extends Activity {
         } else {
             btnNowPlaying.requestFocus(); // 평소 앱을 켤 때는 원래대로 메인 메뉴 포커스
         }
+
+        filter.addAction("android.bluetooth.a2dp.profile.action.CONNECTION_STATE_CHANGED");
+        filter.addAction(WifiManager.SCAN_RESULTS_AVAILABLE_ACTION);
+        filter.addAction(Intent.ACTION_SCREEN_OFF);
+        filter.addAction(Intent.ACTION_CONFIGURATION_CHANGED);
+        // 🚀 [여기에 신규 추가!] 다운로드 국장님이 "다운로드 끝났음!" 하고 외치는 소리를 듣습니다.
+        filter.addAction(DownloadManager.ACTION_DOWNLOAD_COMPLETE);
+        registerReceiver(systemStatusReceiver, filter);
+        
+        
     }
 
     // 1. 파일 개수 카운터 (폴더 경로를 받아서 셉니다)
@@ -3122,11 +3174,10 @@ public class MainActivity extends Activity {
             }
             refreshNowPlayingPreview();
         } else if (state == STATE_BROWSER) {
-            // (이후 기존 코드 유지: if (currentBrowserMode == BROWSER_ROOT ... ))
             if (currentBrowserMode == BROWSER_ROOT || currentBrowserMode == BROWSER_FOLDER) {
                 buildFileBrowserUI();
             } else if (currentBrowserMode == BROWSER_COVER_FLOW) {
-                buildCoverFlowUI(); // 🚀 추가
+                buildCoverFlowUI();
             } else if (currentBrowserMode == BROWSER_ARTISTS) {
                 buildVirtualCategories("ARTIST");
             } else if (currentBrowserMode == BROWSER_PLAYLISTS) {
@@ -3137,6 +3188,15 @@ public class MainActivity extends Activity {
                 buildVirtualCategories("ALBUM");
             } else if (currentBrowserMode == BROWSER_VIRTUAL_SONGS) {
                 buildVirtualSongs();
+            }
+            // =======================================================
+            // 🚀 [추가] 팟캐스트 에피소드나 즐겨찾기 화면으로 복귀했을 때!
+            // 무거운 인터넷 통신 없이 화면만 즉시 새로고침(Refresh)하여 진행률을 바로 띄웁니다!
+            // =======================================================
+            else {
+                if (listVirtualSongs != null && listVirtualSongs.getAdapter() != null) {
+                    ((android.widget.BaseAdapter) listVirtualSongs.getAdapter()).notifyDataSetChanged();
+                }
             }
         } else if (state == STATE_SETTINGS) {
             // 🚀 시스템에 의해 오염된 인덱스를 버리고, 금고에 백업해둔 진짜 위치로 복구한 뒤 화면을 그립니다!
@@ -3342,7 +3402,12 @@ public class MainActivity extends Activity {
     private void openKeyboard() {
         typedPassword = "";
         keyboardIndex = 0;
-        tvKeyboardSsid.setText(t("Target") + ": " + targetWifiSsid);
+        // 🚀 모드에 따라 상단 제목 다르게 표시!
+        if (currentKeyboardMode == 1) {
+            tvKeyboardSsid.setText("🔍 " + t("Search Podcast"));
+        } else {
+            tvKeyboardSsid.setText(t("Target") + ": " + targetWifiSsid);
+        }
         updateKeyboardUI();
     }
 
@@ -3357,23 +3422,46 @@ public class MainActivity extends Activity {
         tvKeyCurrent.setText(KEYBOARD_CHARS[keyboardIndex]);
         tvKeyNext.setText(KEYBOARD_CHARS[idxNext]);
         tvKeyNnext.setText(KEYBOARD_CHARS[idxNnext]);
-        if (isTargetWifiOpen) {
+
+        // 🚀 와이파이 모드일 때만 '개방형 네트워크' 텍스트 표시
+        if (isTargetWifiOpen && currentKeyboardMode == 0) {
             tvKeyboardInput.setText(t("Open Network (Direct Connect)"));
             keyboardIndex = len - 1;
             tvKeyCurrent.setText(KEYBOARD_CHARS[keyboardIndex]);
         } else {
-            tvKeyboardInput.setText(typedPassword.length() == 0 ? t("Enter Password...") : typedPassword);
+            // 🚀 모드에 따라 힌트 텍스트 다르게 표시!
+            if (currentKeyboardMode == 1) {
+                tvKeyboardInput.setText(typedPassword.length() == 0 ? t("Enter keyword...") : typedPassword);
+            } else {
+                tvKeyboardInput.setText(typedPassword.length() == 0 ? t("Enter Password...") : typedPassword);
+            }
         }
     }
 
     private void handleKeyboardInput() {
         String selectedChar = KEYBOARD_CHARS[keyboardIndex];
         clickFeedback();
+
         if (selectedChar.equals("[DEL]")) {
             if (typedPassword.length() > 0)
                 typedPassword = typedPassword.substring(0, typedPassword.length() - 1);
+        } else if (selectedChar.equals("[SPACE]")) {
+            // 🚀 스페이스바 누르면 띄어쓰기 추가!
+            typedPassword += " ";
         } else if (selectedChar.equals("[CONN]")) {
-            connectToWifi();
+            // =======================================================
+            // 🚀 [핵심 분기점] [CONN] 버튼을 눌렀을 때 발사되는 엔진 변경!
+            // =======================================================
+            if (currentKeyboardMode == 1) {
+                if (typedPassword.trim().isEmpty()) {
+                    Toast.makeText(this, t("Please enter a keyword."), Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                changeScreen(STATE_BROWSER); // 💡 검색 버튼을 누르면 키보드를 닫고 브라우저로 복귀!
+                searchPodcastFromApple(typedPassword.trim()); // 🍏 애플 검색 엔진 발사!
+            } else {
+                connectToWifi(); // 기존 와이파이 접속 엔진 발사!
+            }
         } else {
             typedPassword += selectedChar;
         }
@@ -3929,7 +4017,7 @@ public class MainActivity extends Activity {
     }
 
     // 🚀 [메인 엔진 업그레이드] 세 번째 파라미터로 'customColor(도색할 색상)'을 받도록 개조되었습니다.
-    private android.view.View createListButtonWithIcon(String iconUnicode, String textLabel, final int customColor) {
+    public android.view.View createListButtonWithIcon(String iconUnicode, String textLabel, final int customColor) {
         float d = getResources().getDisplayMetrics().density;
 
         final android.widget.LinearLayout rowButton = new android.widget.LinearLayout(this);
@@ -4346,76 +4434,7 @@ public class MainActivity extends Activity {
             }
         });
         containerSettingsItems.addView(btnPowerOff);
-        // 🚀 [추가] 재부팅 없이 즉시 락박스(Rockbox)로 전환하는 혁신적인 스위치 버튼!
-        LinearLayout btnSwitchRockbox = createSettingRow(t("Switch to Rockbox"), "〉 ");
-        btnSwitchRockbox.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-                clickFeedback();
 
-                // 🚀 1. 락박스 앱이 기기에 설치되어 있는지 먼저 안전하게 검사합니다!
-                boolean isRockboxInstalled = false;
-                try {
-                    // 락박스의 패키지명(org.rockbox)이 존재하는지 조회합니다.
-                    getPackageManager().getPackageInfo("org.rockbox", 0);
-                    isRockboxInstalled = true;
-                } catch (android.content.pm.PackageManager.NameNotFoundException e) {
-                    isRockboxInstalled = false;
-                }
-
-                // 🚀 2. 설치되어 있지 않다면 경고 팝업을 띄우고 즉시 중단합니다.
-                if (!isRockboxInstalled) {
-                    new AlertDialog.Builder(MainActivity.this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                            .setTitle(t("Not Installed ⚠️"))
-                            .setMessage(t(
-                                    "Rockbox is not installed on this device.\nPlease install the Rockbox app (.apk) first."))
-                            .setPositiveButton(t("OK"), null)
-                            .show();
-                    return; // 여기서 멈춤! 아래의 전환 코드를 실행하지 않습니다.
-                }
-
-                // 🚀 3. 정상적으로 설치되어 있다면 기존처럼 전환을 시도합니다.
-                new AlertDialog.Builder(MainActivity.this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                        .setTitle(t("Switch to Rockbox"))
-                        .setMessage(t("Do you want to switch to Rockbox instantly without rebooting?"))
-                        .setPositiveButton(t("Switch"), new DialogInterface.OnClickListener() {
-                            public void onClick(DialogInterface dialog, int which) {
-                                try {
-                                    Toast.makeText(MainActivity.this, "Switching to Rockbox...", Toast.LENGTH_SHORT)
-                                            .show();
-
-                                    // 🚀 [긴급 수리: 좀비 라디오 원천 차단!]
-                                    // 락박스로 넘어가기 직전에, 우리 앱이 켜둔 라디오 하드웨어 칩셋 전원을 물리적으로 뽑아버립니다!
-                                    com.themoon.y1.managers.FmRadioManager fm = com.themoon.y1.managers.FmRadioManager
-                                            .getInstance(MainActivity.this);
-                                    if (fm.isPowerUp) {
-                                        fm.powerDown(); // 라디오 칩셋 전원 차단!
-                                    }
-
-                                    // 음악 플레이어도 멈춤 (소리 겹침 방지)
-                                    com.themoon.y1.managers.AudioPlayerManager.getInstance().releasePlayer();
-
-                                    // 💡 칩셋이 꺼질 수 있는 시간(0.2초)을 잠깐 줍니다.
-                                    try {
-                                        Thread.sleep(200);
-                                    } catch (Exception e) {
-                                    }
-
-                                    // 그 다음 안전하게 락박스 활성화 -> 실행 -> 현재 런처 비활성화
-                                    String cmd = "pm enable org.rockbox && am start -n org.rockbox/.RockboxActivity && pm disable com.themoon.y1";
-                                    Runtime.getRuntime().exec(new String[] { "su", "-c", cmd });
-
-                                } catch (Exception e) {
-                                    Toast.makeText(MainActivity.this, "Failed: Root access required.",
-                                            Toast.LENGTH_SHORT).show();
-                                }
-                            }
-                        })
-                        .setNegativeButton(t("Cancel"), null)
-                        .show();
-            }
-        });
-        containerSettingsItems.addView(btnSwitchRockbox);
         LinearLayout btnServerMenu = createSettingRow(t("Web Server"), "〉 ");
         btnServerMenu.setOnClickListener(new View.OnClickListener() {
             @Override
@@ -5788,7 +5807,14 @@ public class MainActivity extends Activity {
                     buildVirtualSongs();
                 });
                 containerBrowserItems.addView(btnRecent);
-
+// 🚀 [팟캐스트 스튜디오 진입 스위치]
+                android.view.View btnPodcast = createListButtonWithIcon("\uE03E", t("Podcasts")); // 🎙️ 라디오/팟캐스트 아이콘
+                btnPodcast.setOnClickListener(v -> {
+                    clickFeedback();
+                    currentBrowserMode = BROWSER_PODCAST_CHANNELS;
+                    buildPodcastChannelsUI(); // 대망의 채널 리스트 팝업!
+                });
+                containerBrowserItems.addView(btnPodcast);
                 android.view.View btnFav = createListButtonWithIcon("\uE87D", t("My Favorites"));
 
                 // btnFav.setTextColor(0xFFFF8888);
@@ -5925,6 +5951,591 @@ public class MainActivity extends Activity {
                 lastBrowserFocusText = "";
             }
         });
+    }
+    // =======================================================
+    // 🚀 [팟캐스트 엔진 1단계] 메모장 자동 생성 및 채널 해독기
+    // =======================================================
+    private void buildPodcastChannelsUI() {
+        if (scrollViewBrowser != null) scrollViewBrowser.setVisibility(View.VISIBLE);
+        if (listVirtualSongs != null) listVirtualSongs.setVisibility(View.GONE);
+        containerBrowserItems.removeAllViews();
+        tvBrowserPath.setText(t("Library") + ": " + t("Podcasts"));
+// =======================================================
+        // 🚀 [새 팟캐스트 검색 버튼 (휠 키보드 호출 버전)]
+        // =======================================================
+        android.view.View btnSearch = createListButtonWithIcon("\uE8B6", t("Search New Podcasts"), 0xFF00FFFF);
+        btnSearch.setOnClickListener(v -> {
+            clickFeedback();
+            currentKeyboardMode = 1; // 🚀 팟캐스트 검색 모드로 키보드 장전!
+            changeScreen(STATE_WIFI_KEYBOARD); // 와이파이 키보드 화면으로 즉시 이동!
+        });
+        containerBrowserItems.addView(btnSearch);
+
+        android.view.View btnManage = createListButtonWithIcon("\uE872", t("Manage Subscriptions"), 0xFFFF5555); // 빨간색 휴지통
+        btnManage.setOnClickListener(v -> {
+            clickFeedback();
+            buildPodcastManageUI(); // 대망의 전용 삭제 스튜디오 오픈!
+        });
+        containerBrowserItems.addView(btnManage);
+
+        // =======================================================
+        // 1. 팟캐스트 전용 폴더가 없으면 뚫어줍니다.
+        File podcastDir = new File("/storage/sdcard0/Podcasts");
+        if (!podcastDir.exists()) podcastDir.mkdirs();
+
+        File subFile = new File(podcastDir, "subscriptions.txt");
+
+        // 🚀 [신규 장착] 파일이 없으면? 글로벌 베스트셀러 팟캐스트 주소로 자동 생성해 버립니다!
+        if (!subFile.exists()) {
+            try {
+                java.io.BufferedWriter bw = new java.io.BufferedWriter(new java.io.OutputStreamWriter(new java.io.FileOutputStream(subFile), "UTF-8"));
+                bw.write("# Y1 Podcast Subscriptions\n");
+                bw.write("# " + t("Format: Channel Name|RSS_URL") + "\n\n");
+
+                bw.close();
+            } catch (Exception e) {}
+        }
+
+        java.util.List<String[]> channels = new java.util.ArrayList<>();
+
+        // 2. 텍스트 파일을 0.01초 만에 훑어서 배열 바구니에 담습니다.
+        if (subFile.exists()) {
+            try {
+                java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(subFile), "UTF-8"));
+                String line;
+                while ((line = br.readLine()) != null) {
+                    if (line.trim().isEmpty() || line.startsWith("#")) continue;
+
+                    String[] parts = line.split("\\|");
+                    if (parts.length >= 2) {
+                        channels.add(new String[]{parts[0].trim(), parts[1].trim()});
+                    } else {
+                        channels.add(new String[]{"Unknown Channel", parts[0].trim()});
+                    }
+                }
+                br.close();
+            } catch (Exception e) {}
+        }
+
+        // 3. 화면에 버튼들(또는 텅 빈 안내문)을 뿌려줍니다!
+        if (channels.isEmpty()) {
+            android.widget.TextView tvEmpty = new android.widget.TextView(this);
+            tvEmpty.setText("⚠️ " + t("No subscriptions found.") + "\n\n" +
+                    t("Create a 'subscriptions.txt' file in the Podcasts folder.") + "\n" +
+                    t("Format: Channel Name|RSS_URL"));
+            tvEmpty.setTextColor(0xFF888888);
+            tvEmpty.setGravity(android.view.Gravity.CENTER);
+            tvEmpty.setPadding(20, 100, 20, 50);
+            tvEmpty.setLineSpacing(15f, 1.2f);
+            containerBrowserItems.addView(tvEmpty);
+        } else {
+            // ... (기존 subscriptions.txt 파일 읽어오는 부분은 그대로 유지) ...
+
+            for (final String[] channel : channels) {
+                android.view.View btnCh = createListButtonWithIcon("\uE03E", channel[0]);
+
+                // 🚀 [해결책 2-1] 나중에 포커스를 찾을 수 있도록 버튼에 채널 이름표를 몰래 달아둡니다.
+                btnCh.setTag(channel[0]);
+
+                btnCh.setOnClickListener(v -> {
+                    clickFeedback();
+                    currentBrowserMode = BROWSER_PODCAST_EPISODES;
+                    currentPodcastUrl = channel[1];
+
+                    // 🚀 [해결책 2-2] 방금 누른 채널 이름을 기억 장부(lastBrowserFocusText)에 적어둡니다!
+                    lastBrowserFocusText = channel[0];
+
+                    buildPodcastEpisodesUI(channel[0], currentPodcastUrl);
+                    android.widget.Toast.makeText(MainActivity.this, t("Connecting to server: ") + channel[0], android.widget.Toast.LENGTH_SHORT).show();
+                });
+                containerBrowserItems.addView(btnCh);
+            }
+        }
+
+        // 🚀 [해결책 2-3] 화면 로딩이 끝난 후, 기억해둔 채널을 찾아 포커스를 정확히 꽂아줍니다!
+        if (containerBrowserItems.getChildCount() > 0) {
+            boolean focused = false;
+            if (lastBrowserFocusText != null && !lastBrowserFocusText.isEmpty()) {
+                // 컨테이너 안의 버튼들을 훑어서 방금 저장한 이름표(Tag)와 똑같은 녀석을 찾습니다.
+                for (int i = 0; i < containerBrowserItems.getChildCount(); i++) {
+                    android.view.View child = containerBrowserItems.getChildAt(i);
+                    if (lastBrowserFocusText.equals(child.getTag())) {
+                        child.requestFocus(); // 🎯 찾았다! 포커스 록온!
+                        focused = true;
+                        break;
+                    }
+                }
+            }
+            // 만약 처음 들어왔거나 기억된 채널이 없다면 맨 위(0번)를 포커스합니다.
+            if (!focused) {
+                containerBrowserItems.getChildAt(0).requestFocus();
+            }
+        }
+    }
+    // =======================================================
+    // =======================================================
+    // 🚀 [팟캐스트 전용] Y1 독자적 OkHttp 백그라운드 다운로드 엔진!
+    // =======================================================
+    public void startPodcastDownload(final String title, final String audioUrl, final String channelName) {
+        android.widget.Toast.makeText(this, "⬇️ " + t("Downloading: ") + title, android.widget.Toast.LENGTH_SHORT).show();
+
+        // 🚀 2. 다운로드 폴더도 채널별로 완벽 격리!
+        String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
+        String safeTitle = title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
+        final java.io.File podcastDir = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel);
+        if (!podcastDir.exists()) podcastDir.mkdirs();
+        final java.io.File destFile = new java.io.File(podcastDir, safeTitle);
+
+        // 🚀 1. 메모장에 주소를 적고 다운로드 준비 상태(0%)로 만듭니다.
+        activePodcastDownloads.put(audioUrl, -1L); // 자체 엔진이므로 ID 대신 -1 사용
+        podcastDownloadProgress.put(audioUrl, 0);
+
+        // 🚀 2. 다운로드 도중 화면이 꺼져 와이파이가 날아가는 것을 철통 방어합니다!
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        if (listVirtualSongs != null && listVirtualSongs.getAdapter() != null) {
+            ((android.widget.BaseAdapter) listVirtualSongs.getAdapter()).notifyDataSetChanged();
+        }
+
+        // 🚀 3. 무적의 백그라운드 다운로드 스레드 가동!
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    okhttp3.OkHttpClient.Builder builder = new okhttp3.OkHttpClient.Builder();
+
+                    // 💡 [핵심] 서버를 완벽하게 속이는 프리패스 보안 캡슐 장착!
+                    javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
+                            new javax.net.ssl.X509TrustManager() {
+                                public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[]{}; }
+                                public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                                public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                            }
+                    };
+                    javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS", "Conscrypt");
+                    sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+                    builder.sslSocketFactory(sslContext.getSocketFactory(), (javax.net.ssl.X509TrustManager)trustAllCerts[0]);
+
+                    builder.hostnameVerifier(new javax.net.ssl.HostnameVerifier() {
+                        @Override
+                        public boolean verify(String hostname, javax.net.ssl.SSLSession session) { return true; }
+                    });
+
+                    okhttp3.OkHttpClient client = builder.build();
+
+                    // 💡 위장 신분증과 함께 '압축 해제(identity)' 명령을 내려 퍼센트 오류를 막습니다!
+                    okhttp3.Request request = new okhttp3.Request.Builder()
+                            .url(audioUrl)
+                            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/114.0.0.0 Safari/537.36")
+                            .header("Accept-Encoding", "identity")
+                            .build();
+
+                    okhttp3.Response response = client.newCall(request).execute();
+                    if (!response.isSuccessful()) throw new java.io.IOException("Server rejected connection");
+
+                    java.io.InputStream is = response.body().byteStream();
+                    long totalLength = response.body().contentLength();
+                    java.io.FileOutputStream fos = new java.io.FileOutputStream(destFile);
+
+                    byte[] buffer = new byte[8192];
+                    int len;
+                    long downloaded = 0;
+                    int lastProgress = 0;
+
+                    // 🚀 파일을 쓰면서 동시에 퍼센트(%)를 계산하여 리스트를 실시간으로 그립니다!
+                    while ((len = is.read(buffer)) != -1) {
+                        fos.write(buffer, 0, len);
+                        downloaded += len;
+
+                        if (totalLength > 0) {
+                            int progress = (int) ((downloaded * 100L) / totalLength);
+
+                            // 1%가 오를 때마다 화면 갱신 지시
+                            if (progress > lastProgress) {
+                                lastProgress = progress;
+                                podcastDownloadProgress.put(audioUrl, progress);
+
+                                runOnUiThread(new Runnable() {
+                                    @Override
+                                    public void run() {
+                                        if (currentBrowserMode == 14 && listVirtualSongs != null && listVirtualSongs.getAdapter() != null) {
+                                            ((android.widget.BaseAdapter) listVirtualSongs.getAdapter()).notifyDataSetChanged();
+                                        }
+                                    }
+                                });
+                            }
+                        }
+                    }
+                    fos.flush(); fos.close(); is.close();
+
+                    // 🚀 4. 다운로드 100% 완료 처리
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            activePodcastDownloads.remove(audioUrl);
+                            podcastDownloadProgress.remove(audioUrl);
+                            android.widget.Toast.makeText(MainActivity.this, "✅ " + t("Download Complete!"), android.widget.Toast.LENGTH_SHORT).show();
+
+                            if (currentBrowserMode == 14 && listVirtualSongs != null && listVirtualSongs.getAdapter() != null) {
+                                ((android.widget.BaseAdapter) listVirtualSongs.getAdapter()).notifyDataSetChanged();
+                            }
+
+                            // 모든 다운로드가 끝났다면 화면 꺼짐 방지(Wakelock) 해제!
+                            if (activePodcastDownloads.isEmpty() && !isCustomScanning && !isRadioScanning && !isServerRunning) {
+                                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                            }
+                        }
+                    });
+
+                } catch (final Exception e) {
+                    if (destFile.exists()) destFile.delete(); // 에러 발생 시 찌꺼기 파일 폭파!
+
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            activePodcastDownloads.remove(audioUrl);
+                            podcastDownloadProgress.remove(audioUrl);
+                            android.widget.Toast.makeText(MainActivity.this, "🚨 Download Failed: " + e.getMessage(), android.widget.Toast.LENGTH_LONG).show();
+
+                            if (currentBrowserMode == 14 && listVirtualSongs != null && listVirtualSongs.getAdapter() != null) {
+                                ((android.widget.BaseAdapter) listVirtualSongs.getAdapter()).notifyDataSetChanged();
+                            }
+                            if (activePodcastDownloads.isEmpty() && !isCustomScanning && !isRadioScanning && !isServerRunning) {
+                                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                            }
+                        }
+                    });
+                }
+            }
+        }).start();
+    }
+    // =======================================================
+    // 🚀 [스마트 팝업 엔진] 휠 조작이 완벽하게 지원되는 머티리얼 팝업!
+    // =======================================================
+    public void showPodcastActionDialog(final String title, final String audioUrl, final String imageUrl, final String channelName) {
+        // 🚀 1. 채널 이름으로 고유 폴더 경로를 생성합니다!
+        String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
+        String safeTitle = title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
+        final java.io.File localFile = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel, safeTitle);
+        // 1. 투명한 배경의 껍데기 다이얼로그 생성
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+
+        float d = getResources().getDisplayMetrics().density;
+
+        // 2. 예쁜 모서리 라운딩과 테마 색상이 들어간 알맹이 박스 조립
+        final android.widget.LinearLayout rootLayout = new android.widget.LinearLayout(this);
+        rootLayout.setOrientation(android.widget.LinearLayout.VERTICAL);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(ThemeManager.getOverlayBackgroundColor() | 0x88000000); // 메인 테마색 바탕
+        bg.setCornerRadius(15 * d);
+        bg.setStroke((int)(1 * d), 0x33FFFFFF); // 은은한 테두리
+        rootLayout.setBackground(bg);
+        rootLayout.setPadding((int)(15*d), (int)(20*d), (int)(15*d), (int)(15*d));
+
+        // 3. 상단 팟캐스트 제목
+        android.widget.TextView tvTitle = new android.widget.TextView(this);
+        tvTitle.setText(title);
+        tvTitle.setTextColor(ThemeManager.getTextColorPrimary());
+        tvTitle.setTextSize(17f);
+        tvTitle.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.BOLD);
+        tvTitle.setGravity(android.view.Gravity.CENTER);
+        tvTitle.setPadding(0, 0, 0, (int)(20*d));
+        rootLayout.addView(tvTitle);
+
+        // 🚀 [휠 조향 장치 추가] 팝업창 안에서 휠(21, 22)을 돌릴 때 위아래로 움직이게 만듭니다!
+        android.view.View.OnKeyListener dialogWheelListener = new android.view.View.OnKeyListener() {
+            @Override
+            public boolean onKey(android.view.View v, int keyCode, android.view.KeyEvent event) {
+                if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+                    if (keyCode == 21) { // 휠 위로 (UP)
+                        int idx = rootLayout.indexOfChild(v);
+                        for (int i = idx - 1; i >= 0; i--) {
+                            if (rootLayout.getChildAt(i).isFocusable()) {
+                                rootLayout.getChildAt(i).requestFocus();
+                                clickFeedback();
+                                return true;
+                            }
+                        }
+                        return true;
+                    }
+                    if (keyCode == 22) { // 휠 아래로 (DOWN)
+                        int idx = rootLayout.indexOfChild(v);
+                        for (int i = idx + 1; i < rootLayout.getChildCount(); i++) {
+                            if (rootLayout.getChildAt(i).isFocusable()) {
+                                rootLayout.getChildAt(i).requestFocus();
+                                clickFeedback();
+                                return true;
+                            }
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            }
+        };
+
+        // ... (showPodcastActionDialog 내부) ...
+        // 4. 기기에 파일이 이미 존재한다면? (다운로드 완료 상태)
+        if (localFile.exists() && localFile.length() > 0) {
+            android.view.View btnPlay = createListButtonWithIcon("\uE037", t("Play (Downloaded)"), 0xFF00FF00); // 초록색 재생
+            btnPlay.setOnKeyListener(dialogWheelListener);
+            btnPlay.setOnClickListener(v -> {
+                clickFeedback();
+                dialog.dismiss();
+
+                // 🚀 [이어서 듣기] 금고에서 기록을 꺼내옵니다!
+                String streamKey = "/PODCAST_STREAM/" + safeChannel + "/" + safeTitle;
+                int savedPos = prefs.getInt("book_pos_" + localFile.getAbsolutePath(), 0);
+                if (savedPos == 0) savedPos = prefs.getInt("book_pos_" + streamKey, 0); // 스트리밍 기록 백업
+
+                java.util.List<java.io.File> playList = new java.util.ArrayList<>();
+                playList.add(localFile);
+
+                // 💡 기록이 있으면 해당 시간으로 점프(Offset)하고, 없으면 처음(0)부터 재생합니다!
+                if (savedPos > 0) {
+                    com.themoon.y1.managers.AudioPlayerManager.getInstance().playTrackListWithOffset(playList, 0, savedPos);
+                } else {
+                    com.themoon.y1.managers.AudioPlayerManager.getInstance().playTrackList(playList, 0);
+                }
+                changeScreen(3);
+            });
+            rootLayout.addView(btnPlay);
+            // ... (삭제 버튼 코드는 동일) ...
+
+        }
+        // 5. 파일이 없다면? (스트리밍 or 다운로드 대기 상태)
+        else {
+            android.view.View btnStream = createListButtonWithIcon("\uE037", t("Stream (Play)"));
+            btnStream.setOnKeyListener(dialogWheelListener);
+            btnStream.setOnClickListener(v -> {
+                clickFeedback();
+                dialog.dismiss();
+                android.widget.Toast.makeText(MainActivity.this, t("Connecting to server: ") + "\n" + title, android.widget.Toast.LENGTH_SHORT).show();
+
+                // 🚀 [이어서 듣기] 스트리밍용 기록 꺼내오기!
+                String streamKey = "/PODCAST_STREAM/" + safeChannel + "/" + safeTitle;
+                int savedPos = prefs.getInt("book_pos_" + streamKey, 0);
+                if (savedPos == 0) savedPos = prefs.getInt("book_pos_" + localFile.getAbsolutePath(), 0);
+
+                // 엔진 호출 시 '채널 이름'과 '기억된 시간(savedPos)'을 추가로 넘겨줍니다!
+                com.themoon.y1.managers.AudioPlayerManager.getInstance().playPodcastStream(audioUrl, title, imageUrl, channelName, savedPos);
+                changeScreen(3);
+            });
+            rootLayout.addView(btnStream);
+            // ... (다운로드 버튼 코드는 동일) ...j
+
+            // 🚀 다운로드 중인지 검사 (containsKey로 변경!)
+            if (activePodcastDownloads.containsKey(audioUrl)) {
+                android.view.View btnDownloading = createListButtonWithIcon("\uE863", t("Downloading..."), 0xFFFF8800); // 오렌지색
+                btnDownloading.setOnKeyListener(dialogWheelListener);
+                rootLayout.addView(btnDownloading);
+            } else {
+                android.view.View btnDown = createListButtonWithIcon("\uE2C4", t("Download"));
+                btnDown.setOnKeyListener(dialogWheelListener);
+                btnDown.setOnClickListener(v -> {
+                    clickFeedback();
+                    dialog.dismiss();
+                    startPodcastDownload(title, audioUrl, channelName); // 🎯 채널 이름 함께 전달!
+                });
+                rootLayout.addView(btnDown);
+            }
+        }
+
+        dialog.setContentView(rootLayout);
+
+        // 🚀 팝업창 크기를 스마트하게 조절
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setLayout((int)(300 * d), android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+
+        dialog.show();
+
+        // 🚀 [포커스 자동 록온] 팝업이 열리면 첫 번째 버튼(인덱스 1)에 자석처럼 휠 포커스 강제 고정!
+        rootLayout.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (rootLayout.getChildCount() > 1) {
+                    rootLayout.getChildAt(1).requestFocus();
+                }
+            }
+        }, 50);
+    }
+    // =======================================================
+    // 🚀 [팟캐스트 엔진 2단계] 인터넷 RSS 연결 및 에피소드 정밀 파서
+    // =======================================================
+    private void buildPodcastEpisodesUI(final String channelName, final String rssUrl) {
+        scrollViewBrowser.setVisibility(View.GONE);
+        listVirtualSongs.setVisibility(View.VISIBLE);
+        tvBrowserPath.setText(t("Podcast") + ": " + channelName);
+// 🚀 [해결책 1] 새 데이터를 긁어오기 전에, 화면에 남아있는 이전 에피소드 잔상을 즉시 폭파시킵니다!
+        virtualSongList.clear();
+        currentScrollIndexList.clear();
+        if (listVirtualSongs.getAdapter() != null) {
+            listVirtualSongs.setAdapter(null); // 리스트뷰를 백지로 만듭니다.
+        }
+        // 1. 인터넷에서 긁어올 동안 사용자가 지루하지 않게 로딩 팝업을 켭니다.
+        showLoadingPopup();
+
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final java.util.List<com.themoon.y1.models.SongItem> episodes = new java.util.ArrayList<>();
+                try {
+                    okhttp3.OkHttpClient.Builder builder = new okhttp3.OkHttpClient.Builder();
+
+                    javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
+                            new javax.net.ssl.X509TrustManager() {
+                                public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[]{}; }
+                                public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                                public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                            }
+                    };
+                    javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS", "Conscrypt");
+                    sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+                    builder.sslSocketFactory(sslContext.getSocketFactory(), (javax.net.ssl.X509TrustManager)trustAllCerts[0]);
+                    builder.hostnameVerifier((hostname, session) -> true);
+
+                    // 🚀 [해결 1] 컬투쇼 같은 거대 XML을 버텨내도록 타임아웃을 60초로 대폭 늘립니다!
+                    okhttp3.OkHttpClient client = builder
+                            .connectTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
+                            .readTimeout(60, java.util.concurrent.TimeUnit.SECONDS)
+                            .build();
+
+                    okhttp3.Request request = new okhttp3.Request.Builder()
+                            .url(rssUrl)
+                            .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/114.0.0.0 Safari/537.36")
+                            .header("Accept", "application/rss+xml, application/xml, text/xml, */*")
+                            .build();
+
+                    okhttp3.Response response = client.newCall(request).execute();
+                    if (!response.isSuccessful()) throw new java.io.IOException("HTTP Error Code: " + response.code());
+
+                    java.io.InputStream is = response.body().byteStream();
+                    org.xmlpull.v1.XmlPullParserFactory factory = org.xmlpull.v1.XmlPullParserFactory.newInstance();
+                    org.xmlpull.v1.XmlPullParser parser = factory.newPullParser();
+                    parser.setInput(is, "UTF-8");
+
+                    int eventType = parser.getEventType();
+                    boolean insideItem = false;
+                    String title = ""; String pubDate = ""; String audioUrl = ""; String imageUrl = "";
+                    String channelImageUrl = ""; // 🚀 간판 이미지 저장용 변수 추가
+
+                    while (eventType != org.xmlpull.v1.XmlPullParser.END_DOCUMENT && episodes.size() < 300) {
+                        String name = parser.getName();
+                        if (name == null) name = "";
+
+                        switch (eventType) {
+                            case org.xmlpull.v1.XmlPullParser.START_TAG:
+                                if (name.equalsIgnoreCase("item")) insideItem = true;
+                                else if (insideItem && name.equalsIgnoreCase("title")) title = parser.nextText();
+                                else if (insideItem && name.equalsIgnoreCase("pubDate")) {
+                                    pubDate = parser.nextText();
+                                    if (pubDate.length() > 16) pubDate = pubDate.substring(0, 16);
+                                }
+                                else if (insideItem && name.equalsIgnoreCase("enclosure")) audioUrl = parser.getAttributeValue(null, "url");
+                                    // 🚀 [간판 훔치기 1] itunes:image 태그일 때
+                                else if (name.equalsIgnoreCase("itunes:image")) {
+                                    String href = parser.getAttributeValue(null, "href");
+                                    if (insideItem) imageUrl = href;
+                                    else if (channelImageUrl.isEmpty() && href != null) channelImageUrl = href;
+                                }
+                                // 🚀 [간판 훔치기 2] 기본 image > url 태그일 때
+                                else if (!insideItem && name.equalsIgnoreCase("url")) {
+                                    try {
+                                        String urlText = parser.nextText();
+                                        if (channelImageUrl.isEmpty() && urlText.startsWith("http")) channelImageUrl = urlText;
+                                    } catch (Exception e) {}
+                                }
+                                break;
+                            case org.xmlpull.v1.XmlPullParser.END_TAG:
+                                if (name.equalsIgnoreCase("item")) {
+                                    if (audioUrl != null && !audioUrl.isEmpty()) {
+                                        episodes.add(new com.themoon.y1.models.SongItem(new File("/PODCAST"), title, channelName, imageUrl, pubDate, audioUrl));
+                                    }
+                                    insideItem = false; title = ""; pubDate = ""; audioUrl = ""; imageUrl = "";
+                                }
+                                break;
+                        }
+                        eventType = parser.next();
+                    }
+                    is.close();
+
+                    // =======================================================
+                    // 🚀 [간판 자동 저장 엔진] 채널 간판 이미지를 찾았다면 cover.jpg로 조용히 다운로드!
+                    // =======================================================
+                    if (!channelImageUrl.isEmpty()) {
+                        String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
+                        java.io.File podcastDir = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel);
+                        if (!podcastDir.exists()) podcastDir.mkdirs();
+
+                        java.io.File coverFile = new java.io.File(podcastDir, "cover.jpg");
+
+                        // 💡 이미 cover.jpg가 있으면 데이터 절약을 위해 다운로드 생략
+                        if (!coverFile.exists()) {
+                            try {
+                                okhttp3.Request imgReq = new okhttp3.Request.Builder().url(channelImageUrl).build();
+                                okhttp3.Response imgRes = client.newCall(imgReq).execute();
+                                if (imgRes.isSuccessful() && imgRes.body() != null) {
+                                    java.io.InputStream imgIs = imgRes.body().byteStream();
+                                    java.io.FileOutputStream imgFos = new java.io.FileOutputStream(coverFile);
+                                    byte[] buf = new byte[8192];
+                                    int len;
+                                    while ((len = imgIs.read(buf)) != -1) {
+                                        imgFos.write(buf, 0, len);
+                                    }
+                                    imgFos.flush(); imgFos.close(); imgIs.close();
+                                }
+                            } catch (Exception e) {}
+                        }
+                    }
+                } catch (final Exception e) {
+                  //  runOnUiThread(() -> android.widget.Toast.makeText(MainActivity.this, "🚨 통신 에러: " + e.toString(), android.widget.Toast.LENGTH_LONG).show());
+                }
+
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (layoutLoadingOverlay != null) layoutLoadingOverlay.setVisibility(View.GONE);
+
+                        // 🚀 [해결 3] 오프라인 생존 엔진: 내가 클릭한 '그 채널의 방'에서만 파일을 긁어옵니다!
+                        if (episodes.isEmpty()) {
+                            String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
+                            java.io.File podcastDir = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel);
+
+                            if (podcastDir.exists()) {
+                                java.io.File[] localFiles = podcastDir.listFiles();
+                                if (localFiles != null) {
+                                    for (java.io.File f : localFiles) {
+                                        if (f.isFile() && f.getName().toLowerCase().endsWith(".mp3")) {
+                                            String localTitle = f.getName().substring(0, f.getName().length() - 4);
+                                            // 💡 주소(url)를 비워두면 어댑터가 기기 파일을 찾아 '✔' 마크를 달아줍니다.
+                                            episodes.add(new com.themoon.y1.models.SongItem(f, localTitle, channelName, "", "", ""));
+                                        }
+                                    }
+                                }
+                            }
+
+                            if (episodes.isEmpty()) {
+                                android.widget.Toast.makeText(MainActivity.this, "📡 " + t("No internet connection and no downloaded files."), android.widget.Toast.LENGTH_LONG).show();
+                            } else {
+                                android.widget.Toast.makeText(MainActivity.this, "📡 " + t("Offline Mode: Showing downloaded episodes only."), android.widget.Toast.LENGTH_LONG).show();
+                            }
+                        }
+
+                        virtualSongList.clear(); currentScrollIndexList.clear();
+                        for (com.themoon.y1.models.SongItem ep : episodes) {
+                            virtualSongList.add(ep.file); currentScrollIndexList.add(ep.title);
+                        }
+
+                        com.themoon.y1.adapters.SongListAdapter adapter = new com.themoon.y1.adapters.SongListAdapter(episodes);
+                        listVirtualSongs.setAdapter(adapter);
+                        if (listVirtualSongs.getChildCount() > 0) listVirtualSongs.getChildAt(0).requestFocus();
+                    }
+                });
+            }
+        }).start();
     }
 
     // 💡 3. 자체 DB에서 아티스트/앨범 카테고리 추출 (초고속 엔진 적용!)
@@ -8387,6 +8998,19 @@ public class MainActivity extends Activity {
             // 🚀 [차량 블루투스 연동] 곡 정보와 재생/정지 상태를 실시간으로 차량에 쏴줍니다!
             sendBluetoothMetaToCar();
             updateBluetoothPlaybackState(am.isPlaying());
+
+            // 🚀 [버그 완벽 픽스!] 하단 재생(Play) 버튼 아이콘 동기화!
+            // 음악이 재생 중일 때는 '일시정지(pause)' 아이콘으로, 멈췄을 때는 '재생(play)' 아이콘으로 갈아끼웁니다.
+            if (ivMenuPreview != null && btnNowPlaying != null && !btnNowPlaying.hasFocus()) {
+                // 포커스가 안 가 있을 때만 아이콘(이미지)을 갈아끼웁니다.
+                if (am.isPlaying()) {
+                    ivMenuPreview.setImageResource(android.R.drawable.ic_media_pause); // ⏸ 정지 아이콘
+                } else {
+                    ivMenuPreview.setImageResource(android.R.drawable.ic_media_play);  // ▶ 재생 아이콘
+                }
+            }
+
+
             // 🚀 [실시간 동기화] 메인 화면에서 나우 플레잉을 주시하고 있을 때 백그라운드에서 곡이 바뀌면 프리뷰 이미지도 실시간 리프레시!
             if (currentScreenState == STATE_MENU && ivWidgetFocusImage != null && tvFocusPreviewClock != null
                     && tvFocusPreviewClock.getVisibility() == View.VISIBLE) {
@@ -8875,6 +9499,15 @@ public class MainActivity extends Activity {
                             currentBrowserMode = BROWSER_ROOT;
                             lastBrowserFocusText = t("Recently Added");
                             buildFileBrowserUI();
+                        }
+                        // 🚀 [팟캐스트 탈출구 추가!]
+                        else if (currentBrowserMode == BROWSER_PODCAST_CHANNELS) {
+                            currentBrowserMode = BROWSER_ROOT;
+                            lastBrowserFocusText = t("Podcasts"); // 나갔을 때 'Podcasts' 버튼에 포커스 록온!
+                            buildFileBrowserUI();
+                        } else if (currentBrowserMode == BROWSER_PODCAST_EPISODES) {
+                            currentBrowserMode = BROWSER_PODCAST_CHANNELS;
+                            buildPodcastChannelsUI(); // 에피소드 창에서 뒤로 가면 채널 리스트로 복귀!
                         }
                     }
                 } else if (currentScreenState == STATE_BLUETOOTH || currentScreenState == STATE_WIFI) {
@@ -9923,8 +10556,7 @@ public class MainActivity extends Activity {
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
-                Toast.makeText(MainActivity.this, "🔍 Searching: " + cleanQuery, Toast.LENGTH_SHORT).show();
-            }
+                Toast.makeText(MainActivity.this, "🔍 "+t("Searching: ") + cleanQuery, Toast.LENGTH_SHORT).show();            }
         });
 
         new Thread(new Runnable() {
@@ -9998,8 +10630,7 @@ public class MainActivity extends Activity {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                Toast.makeText(MainActivity.this, "✅ Album Art & Info Updated!", Toast.LENGTH_SHORT)
-                                        .show();
+                                Toast.makeText(MainActivity.this, t("Album Art & Info Updated!"), Toast.LENGTH_SHORT).show();
                                 if (currentPlaylist.get(currentIndex).getAbsolutePath()
                                         .equals(track.getAbsolutePath())) {
                                     tvPlayerTitle.setText(finalTitle);
@@ -10012,16 +10643,14 @@ public class MainActivity extends Activity {
                         runOnUiThread(new Runnable() {
                             @Override
                             public void run() {
-                                Toast.makeText(MainActivity.this, "❌ No results found.", Toast.LENGTH_SHORT).show();
-                            }
+                                Toast.makeText(MainActivity.this, t("No results found."), Toast.LENGTH_SHORT).show();                            }
                         });
                     }
                 } catch (final Exception e) {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
-                            Toast.makeText(MainActivity.this, "⚠️ Connection Error", Toast.LENGTH_LONG).show();
-                        }
+                            Toast.makeText(MainActivity.this, t("Connection Error"), Toast.LENGTH_LONG).show();                        }
                     });
                 }
             }
@@ -10250,48 +10879,39 @@ public class MainActivity extends Activity {
         com.themoon.y1.managers.AudioEffectManager.getInstance().ensureAudioEffectsReady();
         containerSettingsItems.removeAllViews();
         // 🚀 [신규 장착] 하드웨어/소프트웨어 EQ 엔진 전환 스위치!
-        String eqEngineMode = isSoftwareEqEnabled ? "Software (10-Band)" : "Hardware (5-Band)";
-        final LinearLayout btnEqEngine = createSettingRow("EQ Engine Mode", t(eqEngineMode));
+        // =======================================================
+        // 🚀 [10-Band EQ 전원 스위치]
+        // =======================================================
+        final android.widget.LinearLayout btnSoftwareEq = createSettingRow("10-Band Software EQ", isSoftwareEqEnabled ? t("ON") : t("OFF"));
 
-        btnEqEngine.setOnClickListener(new View.OnClickListener() {
+        btnSoftwareEq.setOnClickListener(new android.view.View.OnClickListener() {
             @Override
-            public void onClick(View v) {
+            public void onClick(android.view.View v) {
                 clickFeedback();
 
-                if (!isSoftwareEqEnabled) {
-                    // 🔴 하드웨어 -> 소프트웨어(10밴드)로 넘어갈 때: 살벌한 전문가용 경고 팝업!
-                    new AlertDialog.Builder(MainActivity.this, android.R.style.Theme_DeviceDefault_Dialog_Alert)
-                            .setTitle("⚠️ " + t("Expert Mode: 10-Band EQ"))
-                            .setMessage(t(
-                                    "This will bypass the native hardware audio chip and use a custom 10-band software DSP.\n\nWarning: This consumes significantly more CPU and battery, and may cause audio stuttering on older devices.\n\nDo you want to proceed?"))
-                            .setPositiveButton(t("Proceed"), new DialogInterface.OnClickListener() {
-                                public void onClick(DialogInterface dialog, int which) {
-                                    isSoftwareEqEnabled = true;
-                                    prefs.edit().putBoolean("software_eq_enabled", true).commit();
+                if (isSoftwareEqEnabled) {
+                    // 🚀 [기존 로직] 스위치 끄기
+                    isSoftwareEqEnabled = false;
+                    ((android.widget.TextView) btnSoftwareEq.getChildAt(1)).setText(t("OFF"));
+                    prefs.edit().putBoolean("software_eq_enabled", false).commit();
 
-                                    // 💡 나중에 추가할 소프트웨어 필터 엔진 재시동 명령이 들어갈 자리입니다.
+                    // =======================================================
+                    // 🛡️ [추가된 방어막!] 5밴드로 돌아오면, 들고 있던 10밴드 프로필을 압수하고 5밴드 순정으로 강제 교체!
+                    // =======================================================
+                    currentEqProfile = "preset_0";
+                    prefs.edit().putString("eq_profile_id", currentEqProfile).commit();
 
-                                    buildEqualizerSettingsUI(); // 화면 즉시 새로고침!
-                                    Toast.makeText(MainActivity.this, t("Software 10-Band EQ Enabled."),
-                                            Toast.LENGTH_SHORT).show();
-                                }
-                            })
-                            .setNegativeButton(t("Cancel"), null)
-                            .show();
-                } else {
-                    // (소프트웨어 모드 ON 팝업의 Proceed 클릭 시)
-                    isSoftwareEqEnabled = true;
-                    prefs.edit().putBoolean("software_eq_enabled", true).commit();
+                    // 🚀 오디오 엔진 재부팅
+                    rebootAudioEngine();
 
-                    // 🚀 [추가] 즉시 엔진 스위칭 가동!
-                    com.themoon.y1.managers.AudioEffectManager.getInstance().applyEqProfile();
-
+                    android.widget.Toast.makeText(MainActivity.this, t("Switched to Hardware 5-Band EQ"), android.widget.Toast.LENGTH_SHORT).show();
                     buildEqualizerSettingsUI();
-                    Toast.makeText(MainActivity.this, t("Hardware 5-Band EQ Enabled."), Toast.LENGTH_SHORT).show();
+                } else {
+                    showSoftwareEqMaterialDialog(btnSoftwareEq);
                 }
             }
         });
-        containerSettingsItems.addView(btnEqEngine);
+        containerSettingsItems.addView(btnSoftwareEq);
         // 🚀 2. 서브 설정창 EQ 표시
         String activeName = "Normal";
         if (currentEqProfile.startsWith("preset_")) {
@@ -10420,12 +11040,41 @@ public class MainActivity extends Activity {
             @Override
             public void onClick(android.view.View v) {
                 clickFeedback();
+
                 if (currentEqProfile.startsWith("preset_")) {
                     android.widget.Toast.makeText(MainActivity.this, t("Please create a Custom Profile to edit!"),
                             android.widget.Toast.LENGTH_LONG).show();
-                } else {
-                    buildGraphicEqualizerUI(); // 대망의 그래픽 EQ 스튜디오 화면으로 진입!
+                    return; // 🛑 여기서 함수를 완전히 종료시킵니다.
                 }
+
+                // =======================================================
+                // 🛡️ [스튜디오 진입 방어막 & 자동 교환 엔진]
+                // =======================================================
+                boolean isProfile10Band = currentEqProfile.contains("_10B") || currentEqProfile.contains("10Band") || currentEqProfile.contains("10.json");
+
+                if (isSoftwareEqEnabled && !isProfile10Band) {
+                    // 💡 10밴드 모드인데 5밴드를 들고 입장하려 할 때
+                    currentEqProfile = "custom_Default_10B";
+
+                    String listStr = prefs.getString("custom_eq_list", "");
+                    if (!listStr.contains("Default_10B")) {
+                        prefs.edit().putString("custom_eq_list", "Default_10B," + listStr).commit();
+                    }
+                    android.widget.Toast.makeText(MainActivity.this, "🔄 " + t("Auto-switched to a 10-Band profile for editing."), android.widget.Toast.LENGTH_SHORT).show();
+                }
+                else if (!isSoftwareEqEnabled && isProfile10Band) {
+                    // 💡 5밴드 모드인데 10밴드를 들고 입장하려 할 때 (수정 가능한 5밴드 커스텀으로 쥐여줍니다!)
+                    currentEqProfile = "custom_Default_5B";
+
+                    String listStr = prefs.getString("custom_eq_list", "");
+                    if (!listStr.contains("Default_5B")) {
+                        prefs.edit().putString("custom_eq_list", "Default_5B," + listStr).commit();
+                    }
+                    android.widget.Toast.makeText(MainActivity.this, "🔄 " + t("Auto-switched to 5-Band default profile."), android.widget.Toast.LENGTH_SHORT).show();
+                }
+
+                // 🚀 자동 교환을 거쳤든, 정상 통과했든 최종적으로 무조건 스튜디오를 엽니다!
+                buildGraphicEqualizerUI();
             }
         });
         containerSettingsItems.addView(btnGraphicEq);
@@ -10442,7 +11091,7 @@ public class MainActivity extends Activity {
         // 🚀 [포커스 유지용 금고] 현재 켜져 있는(방금 누른) EQ 버튼을 기억할 공간입니다!
         final android.view.View[] targetFocusView = { null };
 
-        // 🚀 1. 시스템 프리셋 리스트 출력
+        // 🚀 1. 시스템 프리셋 리스트 출력 (시스템은 무조건 5밴드 전용입니다!)
         if (equalizer != null) {
             for (int i = 0; i < eqPresetNames.size(); i++) {
                 final int pIdx = i;
@@ -10458,6 +11107,15 @@ public class MainActivity extends Activity {
                 }
 
                 btn.setOnClickListener(v -> {
+                    // =======================================================
+                    // 🛡️ [시스템 프리셋 방어막] 시스템 EQ는 무조건 5밴드이므로 10밴드일 때 차단!
+                    // =======================================================
+                    if (isSoftwareEqEnabled) {
+                        clickFeedback();
+                        android.widget.Toast.makeText(MainActivity.this, "⚠️ " + t("Cannot load a 5-Band profile in 10-Band mode."), android.widget.Toast.LENGTH_SHORT).show();
+                        return; // 🛑 강제 차단!
+                    }
+
                     clickFeedback();
                     currentEqProfile = pId;
                     com.themoon.y1.managers.AudioEffectManager.getInstance().applyEqProfile();
@@ -10469,7 +11127,7 @@ public class MainActivity extends Activity {
 
         createCategoryHeader("━ " + t("SELECT USER PROFILES") + " ━");
 
-        // 🚀 2. 커스텀 프로필 리스트 출력
+        // 🚀 2. 커스텀 프리셋 리스트 출력
         String listStr = prefs.getString("custom_eq_list", "");
         if (!listStr.trim().isEmpty()) {
             for (final String prof : listStr.split(",")) {
@@ -10487,6 +11145,24 @@ public class MainActivity extends Activity {
                 }
 
                 btn.setOnClickListener(v -> {
+                    // =======================================================
+                    // 🛡️ [파일 이름 레이더망] 꼬리표(_10B)로 규격 완벽 스캔!
+                    // =======================================================
+                    // 💡 기존 파일(5.json, 10.json)과 신규 꼬리표(_5B, _10B)를 모두 스캔합니다!
+                    boolean isProfile10Band = cId.contains("_10B") || cId.contains("10Band") || cId.contains("10.json");
+
+                    if (isSoftwareEqEnabled && !isProfile10Band) {
+                        clickFeedback();
+                        android.widget.Toast.makeText(MainActivity.this, "⚠️ " + t("Cannot load a 5-Band profile in 10-Band mode."), android.widget.Toast.LENGTH_SHORT).show();
+                        return; // 🛑 5밴드를 10밴드에서 로드하는 것 강제 차단!
+                    }
+                    else if (!isSoftwareEqEnabled && isProfile10Band) {
+                        clickFeedback();
+                        android.widget.Toast.makeText(MainActivity.this, "⚠️ " + t("Cannot load a 10-Band profile in 5-Band mode."), android.widget.Toast.LENGTH_SHORT).show();
+                        return; // 🛑 10밴드를 5밴드에서 로드하는 것 강제 차단!
+                    }
+                    // =======================================================
+
                     clickFeedback();
                     currentEqProfile = cId;
                     com.themoon.y1.managers.AudioEffectManager.getInstance().applyEqProfile();
@@ -11891,5 +12567,750 @@ public class MainActivity extends Activity {
             }
         }, 50);
     }
+    // =======================================================
+    // 🚀 [팟캐스트 전용] 실시간 다운로드 퍼센트(%) 추적 및 화면 유지 엔진
+    // =======================================================
+    private android.os.Handler podcastProgressHandler = new android.os.Handler();
+    private Runnable podcastProgressTask = new Runnable() {
+        @Override
+        public void run() {
+            if (activePodcastDownloads.isEmpty()) {
+                // 💡 다운로드가 모두 끝나면 화면 꺼짐 방지를 해제하여 배터리를 아낍니다!
+                if (!isCustomScanning && !isRadioScanning && !isServerRunning) {
+                    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                }
+                return;
+            }
 
+            android.app.DownloadManager manager = (android.app.DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+            boolean needsListUpdate = false;
+
+            java.util.Iterator<java.util.Map.Entry<String, Long>> it = activePodcastDownloads.entrySet().iterator();
+            while (it.hasNext()) {
+                java.util.Map.Entry<String, Long> entry = it.next();
+                String url = entry.getKey();
+                long downloadId = entry.getValue();
+
+                android.app.DownloadManager.Query q = new android.app.DownloadManager.Query();
+                q.setFilterById(downloadId);
+                android.database.Cursor cursor = manager.query(q);
+
+                if (cursor != null && cursor.moveToFirst()) {
+                    int status = cursor.getInt(cursor.getColumnIndex(android.app.DownloadManager.COLUMN_STATUS));
+                    // 다운로드 완료 또는 실패 시 레이더에서 삭제
+                    if (status == android.app.DownloadManager.STATUS_SUCCESSFUL || status == android.app.DownloadManager.STATUS_FAILED) {
+                        it.remove();
+                        podcastDownloadProgress.remove(url);
+                        needsListUpdate = true;
+                    } else {
+                        // 🚀 진행 중일 때 전체 바이트와 현재 바이트를 나눠 퍼센트(%)를 구합니다!
+                        int bytesDownloaded = cursor.getInt(cursor.getColumnIndex(android.app.DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR));
+                        int bytesTotal = cursor.getInt(cursor.getColumnIndex(android.app.DownloadManager.COLUMN_TOTAL_SIZE_BYTES));
+                        if (bytesTotal > 0) {
+                            int progress = (int) ((bytesDownloaded * 100L) / bytesTotal);
+                            Integer oldProgress = podcastDownloadProgress.get(url);
+                            if (oldProgress == null || oldProgress != progress) {
+                                podcastDownloadProgress.put(url, progress);
+                                needsListUpdate = true;
+                            }
+                        }
+                    }
+                    cursor.close();
+                } else {
+                    it.remove();
+                    podcastDownloadProgress.remove(url);
+                    needsListUpdate = true;
+                    if (cursor != null) cursor.close();
+                }
+            }
+
+            // 퍼센트가 1%라도 오르면 팟캐스트 리스트 화면을 즉시 새로고침!
+            if (needsListUpdate && currentBrowserMode == 14 && listVirtualSongs != null && listVirtualSongs.getAdapter() != null) {
+                ((android.widget.BaseAdapter) listVirtualSongs.getAdapter()).notifyDataSetChanged();
+            }
+
+            if (!activePodcastDownloads.isEmpty()) {
+                podcastProgressHandler.postDelayed(this, 1000); // 1초마다 반복 검사
+            } else {
+                // 다운로드 끝! 화면 잠금 해제
+                if (!isCustomScanning && !isRadioScanning && !isServerRunning) {
+                    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                }
+            }
+        }
+    };
+
+    // =======================================================
+    // 🚀 [이퀄라이저 엔진] 10밴드 전환 전용 머티리얼 경고 팝업!
+    // =======================================================
+    public void showSoftwareEqMaterialDialog(final android.widget.LinearLayout btnSoftwareEq) {
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+
+        float d = getResources().getDisplayMetrics().density;
+
+        android.widget.LinearLayout rootLayout = new android.widget.LinearLayout(this);
+        rootLayout.setOrientation(android.widget.LinearLayout.VERTICAL);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(ThemeManager.getOverlayBackgroundColor() | 0xFF000000);
+        bg.setCornerRadius(15 * d);
+        bg.setStroke((int)(1 * d), 0x33FFFFFF);
+        rootLayout.setBackground(bg);
+        rootLayout.setPadding((int)(20*d), (int)(25*d), (int)(20*d), (int)(20*d));
+
+        // 1. 타이틀 (오렌지색 경고)
+        android.widget.TextView tvTitle = new android.widget.TextView(this);
+        tvTitle.setText("⚠️ 10-Band Software EQ");
+        tvTitle.setTextColor(0xFFFF8800);
+        tvTitle.setTextSize(18f);
+        tvTitle.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.BOLD);
+        tvTitle.setGravity(android.view.Gravity.CENTER);
+        tvTitle.setPadding(0, 0, 0, (int)(15*d));
+        rootLayout.addView(tvTitle);
+
+        // 2. 설명 텍스트
+        android.widget.TextView tvDesc = new android.widget.TextView(this);
+        tvDesc.setText(t("This engine provides precise 10-band tuning, but uses more CPU.\n\nOld devices may experience audio stuttering. Proceed?"));
+        tvDesc.setTextColor(ThemeManager.getTextColorPrimary());
+        tvDesc.setTextSize(15f);
+        tvDesc.setLineSpacing(12f, 1.1f);
+        tvDesc.setGravity(android.view.Gravity.CENTER);
+        tvDesc.setPadding(0, 0, 0, (int)(25*d));
+        rootLayout.addView(tvDesc);
+
+        // 3. 버튼 배치를 위한 가로 레이아웃
+        android.widget.LinearLayout btnLayout = new android.widget.LinearLayout(this);
+        btnLayout.setOrientation(android.widget.LinearLayout.HORIZONTAL);
+
+        // ❌ 취소 버튼
+        final android.view.View btnCancel = createListButtonWithIcon("\uE14C", t("Cancel"));
+        android.widget.LinearLayout.LayoutParams cancelLp = new android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        cancelLp.rightMargin = (int)(4*d);
+        btnCancel.setLayoutParams(cancelLp);
+        btnCancel.setOnClickListener(v -> {
+            clickFeedback();
+            dialog.dismiss();
+        });
+
+        // 🟢 승인(ON) 버튼
+        final android.view.View btnConfirm = createListButtonWithIcon("\uE876", t("Turn ON"), 0xFF00FF00);
+        android.widget.LinearLayout.LayoutParams confirmLp = new android.widget.LinearLayout.LayoutParams(0, android.view.ViewGroup.LayoutParams.WRAP_CONTENT, 1f);
+        confirmLp.leftMargin = (int)(4*d);
+        btnConfirm.setLayoutParams(confirmLp);
+        btnConfirm.setOnClickListener(v -> {
+            clickFeedback();
+            dialog.dismiss();
+
+            // 🚀 [기존 로직] 스위치 켜기
+            isSoftwareEqEnabled = true;
+            prefs.edit().putBoolean("software_eq_enabled", true).commit();
+
+            // =======================================================
+            // 🛡️ [추가된 방어막!] 10밴드로 넘어가면, 들고 있던 5밴드 프로필을 뺏고 10밴드 기본 프로필 장착!
+            // =======================================================
+            currentEqProfile = "custom_Default_10B";
+
+            String listStr = prefs.getString("custom_eq_list", "");
+            if (!listStr.contains("Default_10B")) {
+                prefs.edit().putString("custom_eq_list", "Default_10B," + listStr).commit();
+            }
+            prefs.edit().putString("eq_profile_id", currentEqProfile).commit();
+
+            // 🚀 오디오 엔진 재부팅
+            rebootAudioEngine();
+
+            android.widget.Toast.makeText(MainActivity.this, t("10-Band EQ Engine Activated!"), android.widget.Toast.LENGTH_SHORT).show();
+            buildEqualizerSettingsUI();
+        });
+
+        // 🚀 좌우 휠 조향 장치 (21: 왼쪽/취소, 22: 오른쪽/승인)
+        android.view.View.OnKeyListener dialogWheelListener = new android.view.View.OnKeyListener() {
+            @Override
+            public boolean onKey(android.view.View v, int keyCode, android.view.KeyEvent event) {
+                if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+                    if (keyCode == 21) {
+                        btnCancel.requestFocus(); clickFeedback(); return true;
+                    }
+                    if (keyCode == 22) {
+                        btnConfirm.requestFocus(); clickFeedback(); return true;
+                    }
+                }
+                return false;
+            }
+        };
+        btnCancel.setOnKeyListener(dialogWheelListener);
+        btnConfirm.setOnKeyListener(dialogWheelListener);
+
+        btnLayout.addView(btnCancel);
+        btnLayout.addView(btnConfirm);
+        rootLayout.addView(btnLayout);
+
+        dialog.setContentView(rootLayout);
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setLayout((int)(350 * d), android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
+
+        // 팝업이 뜨면 안전하게 취소 버튼에 포커스!
+        rootLayout.postDelayed(() -> btnCancel.requestFocus(), 50);
+    }
+    // =======================================================
+    // 🚀 [오디오 배관 재조립 엔진] EQ 모드 변경 시 소리 먹통/폭주 완벽 방지
+    // =======================================================
+    public void rebootAudioEngine() {
+        com.themoon.y1.managers.AudioPlayerManager am = com.themoon.y1.managers.AudioPlayerManager.getInstance();
+        if (currentPlaylist != null && !currentPlaylist.isEmpty()) {
+            boolean wasPlaying = am.isPlaying();
+            int currentPos = am.getCurrentPosition();
+
+            am.releasePlayer(); // 💥 기존에 꼬여버린 낡은 배관을 완전히 박살냅니다!
+
+            am.prepareMusicTrack(currentIndex); // 🚀 새 규격(5밴드/10밴드)에 맞춰 배관 100% 깨끗하게 재조립!
+            if (currentPos > 0) am.seekRelative(currentPos); // 듣던 위치로 복귀
+            if (wasPlaying) am.playOrPauseMusic(); // 재생 중이었다면 다시 재생!
+        }
+    }
+
+    // =======================================================
+    // 🚀 [애플 팟캐스트 검색 엔진] 리미트 200개 해제 & 썸네일 아트 추출!
+    // =======================================================
+    private void searchPodcastFromApple(final String keyword) {
+        showLoadingPopup();
+
+        new Thread(() -> {
+            try {
+                String encodedKeyword = java.net.URLEncoder.encode(keyword, "UTF-8");
+                // 🚀 [리미트 해제] 200개까지 검색 결과를 미친 듯이 긁어옵니다!
+                String urlString = "https://itunes.apple.com/search?term=" + encodedKeyword + "&entity=podcast&limit=200";
+
+                okhttp3.OkHttpClient.Builder builder = new okhttp3.OkHttpClient.Builder();
+                javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
+                        new javax.net.ssl.X509TrustManager() {
+                            public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[]{}; }
+                            public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                            public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                        }
+                };
+                javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS", "Conscrypt");
+                sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+                builder.sslSocketFactory(sslContext.getSocketFactory(), (javax.net.ssl.X509TrustManager)trustAllCerts[0]);
+                builder.hostnameVerifier((hostname, session) -> true);
+
+                okhttp3.OkHttpClient client = builder.build();
+                okhttp3.Request request = new okhttp3.Request.Builder().url(urlString).build();
+                okhttp3.Response response = client.newCall(request).execute();
+
+                if (!response.isSuccessful()) throw new java.io.IOException("Apple API Error");
+
+                String jsonResponse = response.body().string();
+                org.json.JSONObject root = new org.json.JSONObject(jsonResponse);
+                org.json.JSONArray results = root.getJSONArray("results");
+
+                final java.util.List<String[]> searchResults = new java.util.ArrayList<>();
+
+                for (int i = 0; i < results.length(); i++) {
+                    org.json.JSONObject item = results.getJSONObject(i);
+                    if (item.has("feedUrl") && item.has("collectionName")) {
+                        String name = item.getString("collectionName");
+                        String author = item.has("artistName") ? item.getString("artistName") : "Unknown";
+                        String rss = item.getString("feedUrl");
+
+                        // 🚀 애플 서버가 제공하는 100x100 픽셀 썸네일 주소 획득!
+                        String artUrl = item.has("artworkUrl100") ? item.getString("artworkUrl100") : "";
+
+                        searchResults.add(new String[]{name, author, rss, artUrl});
+                    }
+                }
+
+                runOnUiThread(() -> {
+                    if (layoutLoadingOverlay != null) layoutLoadingOverlay.setVisibility(View.GONE);
+                    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+
+                    if (searchResults.isEmpty()) {
+                        Toast.makeText(MainActivity.this, t("No podcasts found for: ") + keyword, Toast.LENGTH_SHORT).show();
+                    } else {
+                        // 대망의 무한 스크롤 팝업창 호출
+                        showPodcastSearchResultsDialog(searchResults);
+                    }
+                });
+
+            } catch (Exception e) {
+                runOnUiThread(() -> {
+                    if (layoutLoadingOverlay != null) layoutLoadingOverlay.setVisibility(View.GONE);
+                    getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+                    Toast.makeText(MainActivity.this, "Search Failed: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                });
+            }
+        }).start();
+    }
+    // =======================================================
+    // 🚀 [애플 팟캐스트 검색 결과 창] 썸네일 보안 우회 + ListView 폴링 엔진!
+    // =======================================================
+    private void showPodcastSearchResultsDialog(final java.util.List<String[]> results) {
+        final float d = getResources().getDisplayMetrics().density;
+
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+
+        LinearLayout rootLayout = new LinearLayout(this);
+        rootLayout.setOrientation(LinearLayout.VERTICAL);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(ThemeManager.getOverlayBackgroundColor() | 0xFF000000);
+        bg.setCornerRadius(15 * d);
+        rootLayout.setBackground(bg);
+        rootLayout.setPadding((int)(10*d), (int)(20*d), (int)(10*d), (int)(10*d));
+
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("🔍 " + t("Search Results") + " (" + results.size() + ")");
+        tvTitle.setTextColor(0xFF00FFFF);
+        tvTitle.setTextSize(18f);
+        tvTitle.setTypeface(ThemeManager.getCustomFont(), Typeface.BOLD);
+        tvTitle.setGravity(Gravity.CENTER);
+        tvTitle.setPadding(0, 0, 0, (int)(15*d));
+        rootLayout.addView(tvTitle);
+
+        // =======================================================
+        // 🚀 [핵심 추가] 이미지 전용 '무적의 우회 통신망' 1개 개통! (메모리 절약)
+        // =======================================================
+        okhttp3.OkHttpClient tempClient = null;
+        try {
+            okhttp3.OkHttpClient.Builder builder = new okhttp3.OkHttpClient.Builder();
+            javax.net.ssl.TrustManager[] trustAllCerts = new javax.net.ssl.TrustManager[]{
+                    new javax.net.ssl.X509TrustManager() {
+                        public java.security.cert.X509Certificate[] getAcceptedIssuers() { return new java.security.cert.X509Certificate[]{}; }
+                        public void checkClientTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                        public void checkServerTrusted(java.security.cert.X509Certificate[] certs, String authType) {}
+                    }
+            };
+            javax.net.ssl.SSLContext sslContext = javax.net.ssl.SSLContext.getInstance("TLS", "Conscrypt");
+            sslContext.init(null, trustAllCerts, new java.security.SecureRandom());
+            builder.sslSocketFactory(sslContext.getSocketFactory(), (javax.net.ssl.X509TrustManager)trustAllCerts[0]);
+            builder.hostnameVerifier((hostname, session) -> true);
+            tempClient = builder.build();
+        } catch (Exception e) {}
+
+        final okhttp3.OkHttpClient imageClient = tempClient;
+
+        // 🚀 ListView 조립
+        final ListView listView = new ListView(this);
+        listView.setDivider(new ColorDrawable(0x00000000));
+        listView.setDividerHeight((int)(4*d));
+        listView.setSelector(new ColorDrawable(android.graphics.Color.TRANSPARENT));
+        listView.setScrollbarFadingEnabled(false);
+        listView.setItemsCanFocus(true);
+
+        android.widget.BaseAdapter adapter = new android.widget.BaseAdapter() {
+            @Override
+            public int getCount() { return results.size(); }
+            @Override
+            public Object getItem(int position) { return results.get(position); }
+            @Override
+            public long getItemId(int position) { return position; }
+
+            @Override
+            public View getView(final int position, View convertView, ViewGroup parent) {
+                LinearLayout itemBtn;
+                ImageView ivThumb;
+                TextView t1, t2;
+
+                if (convertView == null) {
+                    itemBtn = new LinearLayout(MainActivity.this);
+                    itemBtn.setOrientation(LinearLayout.HORIZONTAL);
+                    itemBtn.setGravity(Gravity.CENTER_VERTICAL);
+                    itemBtn.setFocusable(true);
+                    itemBtn.setClickable(true);
+                    itemBtn.setSoundEffectsEnabled(false);
+                    itemBtn.setBackground(createButtonBackground(ThemeManager.getListButtonNormalBg()));
+                    itemBtn.setPadding((int)(10*d), (int)(10*d), (int)(10*d), (int)(10*d));
+
+                    android.widget.AbsListView.LayoutParams btnLp = new android.widget.AbsListView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                    itemBtn.setLayoutParams(btnLp);
+
+                    ivThumb = new ImageView(MainActivity.this);
+                    LinearLayout.LayoutParams thumbLp = new LinearLayout.LayoutParams((int)(55*d), (int)(55*d));
+                    thumbLp.rightMargin = (int)(15*d);
+                    ivThumb.setLayoutParams(thumbLp);
+                    ivThumb.setScaleType(ImageView.ScaleType.CENTER_CROP);
+                    ivThumb.setBackgroundColor(0x22FFFFFF);
+
+                    LinearLayout textContainer = new LinearLayout(MainActivity.this);
+                    textContainer.setOrientation(LinearLayout.VERTICAL);
+                    textContainer.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1.0f));
+
+                    t1 = new TextView(MainActivity.this);
+                    t1.setTextColor(ThemeManager.getTextColorPrimary());
+                    t1.setTextSize(16f);
+                    t1.setTypeface(ThemeManager.getCustomFont(), Typeface.BOLD);
+                    t1.setSingleLine(true);
+                    t1.setEllipsize(android.text.TextUtils.TruncateAt.END);
+
+                    t2 = new TextView(MainActivity.this);
+                    t2.setTextColor(ThemeManager.getTextColorSecondary());
+                    t2.setTextSize(13f);
+                    t2.setTypeface(ThemeManager.getCustomFont(), Typeface.NORMAL);
+                    t2.setSingleLine(true);
+                    t2.setEllipsize(android.text.TextUtils.TruncateAt.END);
+
+                    textContainer.addView(t1);
+                    textContainer.addView(t2);
+
+                    itemBtn.addView(ivThumb);
+                    itemBtn.addView(textContainer);
+
+                    itemBtn.setTag(new Object[]{ivThumb, t1, t2});
+                } else {
+                    itemBtn = (LinearLayout) convertView;
+                    Object[] holder = (Object[]) itemBtn.getTag();
+                    ivThumb = (ImageView) holder[0];
+                    t1 = (TextView) holder[1];
+                    t2 = (TextView) holder[2];
+                }
+
+                final String[] selected = results.get(position);
+                final String channelName = selected[0];
+                final String author = selected[1];
+                final String rssUrl = selected[2];
+                final String artUrl = selected[3];
+
+                t1.setText(channelName);
+                t2.setText(author);
+
+                ivThumb.setImageBitmap(null); // 이전 껍데기 잔상 초기화
+                ivThumb.setTag(artUrl); // 목표 주소 각인
+
+                // =======================================================
+                // 🚀 [이미지 다운로드] 무적 통신망(OkHttp)으로 애플 보안 서버 박살내기!
+                // =======================================================
+                if (!artUrl.isEmpty() && imageClient != null) {
+                    new Thread(() -> {
+                        try {
+                            okhttp3.Request request = new okhttp3.Request.Builder().url(artUrl).build();
+                            okhttp3.Response response = imageClient.newCall(request).execute();
+
+                            if (response.isSuccessful() && response.body() != null) {
+                                java.io.InputStream is = response.body().byteStream();
+                                final android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(is);
+                                is.close();
+
+                                runOnUiThread(() -> {
+                                    // 휠을 돌려 뷰가 재활용되었어도 원래 주소와 일치할 때만 그림 그리기!
+                                    if (artUrl.equals(ivThumb.getTag())) {
+                                        ivThumb.setImageBitmap(bmp);
+                                    }
+                                });
+                            }
+                        } catch (Exception e) {}
+                    }).start();
+                }
+
+                // 포커스 처리
+                final TextView finalT1 = t1;
+                final TextView finalT2 = t2;
+                itemBtn.setOnFocusChangeListener((v, hasFocus) -> {
+                    if (hasFocus) {
+                        v.setBackground(createButtonBackground(ThemeManager.getListButtonFocusedBg()));
+                        finalT1.setTextColor(ThemeManager.getListButtonFocusedTextColor());
+                        finalT2.setTextColor(ThemeManager.getListButtonFocusedTextColor());
+                    } else {
+                        v.setBackground(createButtonBackground(ThemeManager.getListButtonNormalBg()));
+                        finalT1.setTextColor(ThemeManager.getTextColorPrimary());
+                        finalT2.setTextColor(ThemeManager.getTextColorSecondary());
+                    }
+                });
+
+                // 특수 휠 우회 엔진
+                itemBtn.setOnKeyListener((v, keyCode, event) -> {
+                    if (event.getAction() == KeyEvent.ACTION_DOWN) {
+                        if (keyCode == 21 || keyCode == 19) {
+                            int targetPos = position - 1;
+                            if (targetPos >= 0) {
+                                listView.setSelectionFromTop(targetPos, (int)(10 * d));
+                                listView.post(() -> {
+                                    int visibleIdx = targetPos - listView.getFirstVisiblePosition();
+                                    if (visibleIdx >= 0 && visibleIdx < listView.getChildCount()) {
+                                        listView.getChildAt(visibleIdx).requestFocus();
+                                    }
+                                });
+                                clickFeedback();
+                            }
+                            return true;
+                        }
+                        if (keyCode == 22 || keyCode == 20) {
+                            int targetPos = position + 1;
+                            if (targetPos < results.size()) {
+                                listView.setSelectionFromTop(targetPos, (int)(10 * d));
+                                listView.post(() -> {
+                                    int visibleIdx = targetPos - listView.getFirstVisiblePosition();
+                                    if (visibleIdx >= 0 && visibleIdx < listView.getChildCount()) {
+                                        listView.getChildAt(visibleIdx).requestFocus();
+                                    }
+                                });
+                                clickFeedback();
+                            }
+                            return true;
+                        }
+                    }
+                    return false;
+                });
+
+                // 클릭 (구독)
+                itemBtn.setOnClickListener(v -> {
+                    clickFeedback();
+                    try {
+                        File podcastDir = new File("/storage/sdcard0/Podcasts");
+                        if (!podcastDir.exists()) podcastDir.mkdirs();
+                        File subFile = new File(podcastDir, "subscriptions.txt");
+
+                        java.io.FileOutputStream fos = new java.io.FileOutputStream(subFile, true);
+                        java.io.BufferedWriter bw = new java.io.BufferedWriter(new java.io.OutputStreamWriter(fos, "UTF-8"));
+
+                        String safeName = channelName.replace("|", "-");
+                        bw.write("\n" + safeName + "|" + rssUrl);
+                        bw.close();
+
+                        Toast.makeText(MainActivity.this, "✅ " + t("Subscribed: ") + safeName, Toast.LENGTH_SHORT).show();
+                        dialog.dismiss();
+
+                        buildPodcastChannelsUI();
+                    } catch (Exception e) {
+                        Toast.makeText(MainActivity.this, "Error saving: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+                    }
+                });
+
+                return itemBtn;
+            }
+        };
+        listView.setAdapter(adapter);
+
+        LinearLayout listWrapper = new LinearLayout(this);
+        listWrapper.setPadding(0, 0, 0, 0);
+        listWrapper.addView(listView, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, (int)(320*d)));
+
+        rootLayout.addView(listWrapper);
+
+        dialog.setContentView(rootLayout);
+        Window window = dialog.getWindow();
+        if (window != null) {
+            window.setLayout((int)(340 * d), ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
+
+        listView.postDelayed(() -> {
+            if (listView.getChildCount() > 0) {
+                listView.getChildAt(0).requestFocus();
+            }
+        }, 100);
+    }
+
+    // =======================================================
+    // 🚀 [팟캐스트 삭제 엔진] 구독 해지와 동시에 다운로드된 파일까지 싹 다 날립니다!
+    // =======================================================
+    private void removePodcastSubscription(String channelName, String targetRssUrl) {
+        try {
+            File podcastDir = new File("/storage/sdcard0/Podcasts");
+            File subFile = new File(podcastDir, "subscriptions.txt");
+            if (!subFile.exists()) return;
+
+            // 1. 메모장(subscriptions.txt)에서 해당 채널 줄 지우기
+            java.util.List<String> lines = new java.util.ArrayList<>();
+            java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(subFile), "UTF-8"));
+            String line;
+            while ((line = br.readLine()) != null) {
+                if (line.trim().isEmpty() || line.startsWith("#")) { lines.add(line); continue; }
+                String[] parts = line.split("\\|");
+                if (parts.length >= 2 && parts[1].trim().equals(targetRssUrl.trim())) continue;
+                lines.add(line);
+            }
+            br.close();
+
+            java.io.BufferedWriter bw = new java.io.BufferedWriter(new java.io.OutputStreamWriter(new java.io.FileOutputStream(subFile), "UTF-8"));
+            for (String l : lines) bw.write(l + "\n");
+            bw.close();
+
+            // 🚀 2. [신규 장착] 폴더 및 내부 파일 (음원, cover.jpg) 싹 다 폭파!
+            String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
+            File channelFolder = new File(podcastDir, safeChannel);
+            if (channelFolder.exists()) {
+                File[] files = channelFolder.listFiles();
+                if (files != null) {
+                    for (File f : files) f.delete(); // 폴더 안의 파일들 모두 삭제
+                }
+                channelFolder.delete(); // 텅 빈 폴더 최종 삭제
+            }
+
+            Toast.makeText(this, "🗑️ " + t("Channel deleted."), Toast.LENGTH_SHORT).show();
+
+        } catch (Exception e) {
+            Toast.makeText(this, "Error deleting: " + e.getMessage(), Toast.LENGTH_SHORT).show();
+        }
+    }
+    // =======================================================
+    // 🚀 [팟캐스트 삭제 머티리얼 팝업] 휠 포커스 완벽 지원!
+    // =======================================================
+    private void showDeletePodcastMaterialDialog(final String channelName, final String rssUrl) {
+        float d = getResources().getDisplayMetrics().density;
+        final android.app.Dialog dialog = new android.app.Dialog(this);
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.getWindow().setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+
+        LinearLayout rootLayout = new LinearLayout(this);
+        rootLayout.setOrientation(LinearLayout.VERTICAL);
+        android.graphics.drawable.GradientDrawable bg = new android.graphics.drawable.GradientDrawable();
+        bg.setColor(ThemeManager.getOverlayBackgroundColor() | 0xFF000000); // 메인 테마색 바탕
+        bg.setCornerRadius(15 * d);
+        bg.setStroke((int)(1 * d), 0x33FFFFFF); // 은은한 테두리
+        rootLayout.setBackground(bg);
+        rootLayout.setPadding((int)(15*d), (int)(20*d), (int)(15*d), (int)(15*d));
+
+        // 1. 제목 텍스트 (빨간색 강조)
+        TextView tvTitle = new TextView(this);
+        tvTitle.setText("🗑️ " + t("Delete Channel"));
+        tvTitle.setTextColor(0xFFFF5555);
+        tvTitle.setTextSize(18f);
+        tvTitle.setTypeface(ThemeManager.getCustomFont(), android.graphics.Typeface.BOLD);
+        tvTitle.setGravity(android.view.Gravity.CENTER);
+        tvTitle.setPadding(0, 0, 0, (int)(10*d));
+        rootLayout.addView(tvTitle);
+
+        // 2. 메시지 텍스트
+        TextView tvMsg = new TextView(this);
+        tvMsg.setText(t("Do you want to delete '") + channelName + "'?");
+        tvMsg.setTextColor(ThemeManager.getTextColorPrimary());
+        tvMsg.setTextSize(16f);
+        tvMsg.setGravity(android.view.Gravity.CENTER);
+        tvMsg.setPadding(0, 0, 0, (int)(20*d));
+        tvMsg.setLineSpacing(5f, 1.2f);
+        rootLayout.addView(tvMsg);
+
+        // 3. 휠 조향 센서 (위아래 완벽 이동)
+        android.view.View.OnKeyListener dialogWheelListener = new android.view.View.OnKeyListener() {
+            @Override
+            public boolean onKey(android.view.View v, int keyCode, android.view.KeyEvent event) {
+                if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+                    if (keyCode == 21 || keyCode == 19) {
+                        int idx = rootLayout.indexOfChild(v);
+                        for (int i = idx - 1; i >= 0; i--) {
+                            if (rootLayout.getChildAt(i).isFocusable()) {
+                                rootLayout.getChildAt(i).requestFocus();
+                                clickFeedback();
+                                return true;
+                            }
+                        }
+                        return true;
+                    }
+                    if (keyCode == 22 || keyCode == 20) {
+                        int idx = rootLayout.indexOfChild(v);
+                        for (int i = idx + 1; i < rootLayout.getChildCount(); i++) {
+                            if (rootLayout.getChildAt(i).isFocusable()) {
+                                rootLayout.getChildAt(i).requestFocus();
+                                clickFeedback();
+                                return true;
+                            }
+                        }
+                        return true;
+                    }
+                }
+                return false;
+            }
+        };
+
+        // 4. [삭제] 버튼
+        android.view.View btnDelete = createListButtonWithIcon("\uE872", t("Delete"), 0xFFFF5555);
+        btnDelete.setOnKeyListener(dialogWheelListener);
+        btnDelete.setOnClickListener(v -> {
+            clickFeedback();
+            dialog.dismiss();
+            removePodcastSubscription(channelName, rssUrl);
+            buildPodcastManageUI(); // 화면 새로고침
+        });
+        rootLayout.addView(btnDelete);
+
+        // 5. [취소] 버튼
+        android.view.View btnCancel = createListButtonWithIcon("\uE14C", t("Cancel"), ThemeManager.getTextColorSecondary());
+        btnCancel.setOnKeyListener(dialogWheelListener);
+        btnCancel.setOnClickListener(v -> {
+            clickFeedback();
+            dialog.dismiss();
+        });
+        rootLayout.addView(btnCancel);
+
+        dialog.setContentView(rootLayout);
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setLayout((int)(320 * d), android.view.ViewGroup.LayoutParams.WRAP_CONTENT);
+        }
+        dialog.show();
+
+        // 🚀 팝업이 열리면 안전하게 '취소' 버튼에 먼저 포커스! (실수 방지)
+        rootLayout.postDelayed(() -> btnCancel.requestFocus(), 50);
+    }
+    // =======================================================
+    // 🚀 [팟캐스트 구독 관리 화면] 휠로 돌려서 삭제할 채널을 고르는 스튜디오!
+    // =======================================================
+    private void buildPodcastManageUI() {
+        if (scrollViewBrowser != null) scrollViewBrowser.setVisibility(View.VISIBLE);
+        if (listVirtualSongs != null) listVirtualSongs.setVisibility(View.GONE);
+        containerBrowserItems.removeAllViews();
+        tvBrowserPath.setText(t("Podcasts") + ": " + t("Manage Subscriptions"));
+
+        // 🚀 1. 뒤로 가기 버튼 (가장 위에 배치)
+        android.view.View btnBack = createListButtonWithIcon("\uE5C4", t("Back to Podcasts")); // 뒤로가기 화살표 아이콘
+        btnBack.setOnClickListener(v -> {
+            clickFeedback();
+            buildPodcastChannelsUI(); // 원래의 팟캐스트 메인 화면으로 복귀!
+        });
+        containerBrowserItems.addView(btnBack);
+
+        // 메모장에서 채널 목록 읽어오기
+        File podcastDir = new File("/storage/sdcard0/Podcasts");
+        File subFile = new File(podcastDir, "subscriptions.txt");
+        java.util.List<String[]> channels = new java.util.ArrayList<>();
+
+        if (subFile.exists()) {
+            try {
+                java.io.BufferedReader br = new java.io.BufferedReader(new java.io.InputStreamReader(new java.io.FileInputStream(subFile), "UTF-8"));
+                String line;
+                while ((line = br.readLine()) != null) {
+                    if (line.trim().isEmpty() || line.startsWith("#")) continue;
+                    String[] parts = line.split("\\|");
+                    if (parts.length >= 2) {
+                        channels.add(new String[]{parts[0].trim(), parts[1].trim()});
+                    }
+                }
+                br.close();
+            } catch (Exception e) {}
+        }
+
+        // 🚀 2. 삭제할 채널 목록 그리기
+        if (channels.isEmpty()) {
+            TextView tvEmpty = new TextView(this);
+            tvEmpty.setText("⚠️ " + t("No subscriptions found."));
+            tvEmpty.setTextColor(0xFF888888);
+            tvEmpty.setGravity(Gravity.CENTER);
+            tvEmpty.setPadding(20, 100, 20, 50);
+            containerBrowserItems.addView(tvEmpty);
+        } else {
+            for (final String[] channel : channels) {
+                // 💡 빨간색(0xFFFF5555) 휴지통 아이콘으로 '삭제용 버튼'임을 명확히 보여줍니다!
+                android.view.View btnDel = createListButtonWithIcon("\uE872", channel[0], 0xFFFF5555);
+
+                // 기존의 new AlertDialog.Builder(...) 부분을 통째로 지우고 이 한 줄로 교체하세요!
+                btnDel.setOnClickListener(v -> {
+                    clickFeedback();
+                    showDeletePodcastMaterialDialog(channel[0], channel[1]); // 🚀 머티리얼 팝업 호출
+                });
+                containerBrowserItems.addView(btnDel);
+            }
+        }
+
+        // 🚀 3. 화면이 열리면 첫 번째 채널(인덱스 1번)에 자동으로 휠 포커스 고정!
+        if (containerBrowserItems.getChildCount() > 1) {
+            containerBrowserItems.postDelayed(() -> {
+                containerBrowserItems.getChildAt(1).requestFocus();
+            }, 50);
+        }
+    }
 }

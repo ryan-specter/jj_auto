@@ -216,7 +216,6 @@
             <TextView android:id="@+id/tv_key_next" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="d" android:textColor="#AAAAAA" android:textSize="20sp" android:layout_marginLeft="12dp"/>
             <TextView android:id="@+id/tv_key_nnext" android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="e" android:textColor="#555555" android:textSize="14sp" android:layout_marginLeft="12dp"/>
         </LinearLayout>
-        <TextView android:layout_width="wrap_content" android:layout_height="wrap_content" android:text="Wheel: Move | Center: Enter | Top: Back" android:textColor="#888888" android:textSize="12sp" android:layout_marginTop="15dp"/>
     </LinearLayout>
 
     <FrameLayout

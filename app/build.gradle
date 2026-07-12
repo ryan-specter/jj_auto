@@ -43,7 +43,8 @@ dependencies {
     implementation files('libs/extension-opus-release.aar')
     implementation files('libs/extension-flac-release.aar')
     implementation files('libs/extension-ffmpeg-release.aar') // 🚀 [신규 무기 장착] FFmpeg 코어 결합!
-
+    implementation 'com.squareup.okhttp3:okhttp:3.12.13'
+    implementation 'org.conscrypt:conscrypt-android:2.5.2'
     implementation 'androidx.multidex:multidex:2.0.1'
 }
 // 파일 맨 밑에 추가: 최신 라이브러리 버전 체크 안전장치를 강제로 끄는 코드

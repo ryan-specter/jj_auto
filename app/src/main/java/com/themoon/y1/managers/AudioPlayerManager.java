@@ -296,7 +296,72 @@ public class AudioPlayerManager {
         prepareMusicTrack(main.currentIndex);
         main.updatePlayerUI(); // 🚀 타이머 즉시 시작!
     }
+    public void playPodcastStream(String url, String title, String imageUrl, String channelName, int offsetMs) {
+        final MainActivity main = MainActivity.instance;
+        if (main == null) return;
 
+        try {
+            if (legacyPlayer != null) { legacyPlayer.stop(); legacyPlayer.reset(); }
+            if (exoPlayer == null) initPlayer(main.getApplicationContext());
+            else { exoPlayer.stop(); exoPlayer.clearMediaItems(); }
+
+            isUsingLegacyPlayer = false;
+
+            // 🚀 [핵심 엔진] 스트리밍일 때도 '가짜(Dummy) 플레이리스트'를 만들어 시간을 기록하게 속입니다!
+            String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
+            String safeTitle = title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
+            main.currentPlaylist.clear();
+            main.currentPlaylist.add(new java.io.File("/PODCAST_STREAM/" + safeChannel, safeTitle));
+            main.currentIndex = 0;
+
+            com.google.android.exoplayer2.MediaItem mediaItem = com.google.android.exoplayer2.MediaItem.fromUri(android.net.Uri.parse(url));
+            com.google.android.exoplayer2.upstream.DataSource.Factory dataSourceFactory = new com.google.android.exoplayer2.upstream.DefaultDataSourceFactory(main, com.google.android.exoplayer2.util.Util.getUserAgent(main, "Y1_Launcher"));
+            com.google.android.exoplayer2.extractor.DefaultExtractorsFactory extractorsFactory = new com.google.android.exoplayer2.extractor.DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true);
+            com.google.android.exoplayer2.source.MediaSource mediaSource = new com.google.android.exoplayer2.source.ProgressiveMediaSource.Factory(dataSourceFactory, extractorsFactory).createMediaSource(mediaItem);
+
+            exoPlayer.setMediaSource(mediaSource);
+            exoPlayer.prepare();
+
+            // 🚀 [이어서 재생] 팝업에서 넘겨받은 시간이 있다면 그곳으로 워프!
+            if (offsetMs > 0) {
+                exoPlayer.seekTo(offsetMs);
+            }
+            exoPlayer.setPlaybackParameters(new com.google.android.exoplayer2.PlaybackParameters(currentSpeed, 1.0f));
+
+            main.runOnUiThread(() -> {
+                main.isPausedByHand = false;
+                main.tvPlayerTitle.setText(title);
+                main.tvPlayerArtist.setText(channelName); // 가수에 팟캐스트 채널명 표시
+                main.ivAlbumArt.setImageResource(R.drawable.default_album);
+                main.ivPlayerBgBlur.setImageResource(0);
+                main.updatePlayerUI();
+            });
+
+            // (앨범 아트 백그라운드 다운로드 코드는 이전과 동일하게 유지!)
+            if (imageUrl != null && !imageUrl.isEmpty()) {
+                new Thread(() -> {
+                    try {
+                        java.net.URL imgUrl = new java.net.URL(imageUrl);
+                        java.net.HttpURLConnection conn = (java.net.HttpURLConnection) imgUrl.openConnection();
+                        conn.setDoInput(true); conn.connect();
+                        final android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(conn.getInputStream());
+                        if (bmp != null) {
+                            main.runOnUiThread(() -> {
+                                main.ivAlbumArt.setImageBitmap(bmp);
+                                android.graphics.Bitmap blurredBg = main.applyGaussianBlur(bmp);
+                                main.ivPlayerBgBlur.setImageBitmap(blurredBg);
+                                main.currentAlbumColor = bmp.getPixel(bmp.getWidth()/2, (int)(bmp.getHeight()*0.8)) | 0xFF000000;
+                                main.updateMainMenuBackground();
+                            });
+                        }
+                    } catch (Exception e) {}
+                }).start();
+            }
+
+            exoPlayer.setPlayWhenReady(true);
+
+        } catch (Exception e) {}
+    }
     public void playTrackListWithOffset(List<File> list, int index, int offsetMs) {
         playTrackList(list, index);
         if (offsetMs > 0) {
@@ -506,6 +571,15 @@ public class AudioPlayerManager {
             String safeFileName = track.getName().replace(".mp3", "").replace(".flac", "").replace(".wav", "").replace(".m4a", "").replace(".opus", "").replace(".m4b", "");
             File coverFile = new File("/storage/sdcard0/Y1_Covers", safeFileName + ".jpg");
 
+            // 🚀 [팟캐스트 초고속 렌더링 지름길 장착!]
+            boolean isPodcast = track.getAbsolutePath().contains("/Podcasts/");
+            File podcastCoverFile = null;
+            if (isPodcast) {
+                // 무거운 MP3 태그 스캔을 완벽히 건너뛰고, 폴더 안의 cover.jpg를 1순위로 지정합니다!
+                File podcastFolder = track.getParentFile();
+                podcastCoverFile = new File(podcastFolder, "cover.jpg");
+            }
+
             if (main.prefs.contains("meta_title_" + track.getAbsolutePath())) {
                 t = main.prefs.getString("meta_title_" + track.getAbsolutePath(), t);
                 a = main.prefs.getString("meta_artist_" + track.getAbsolutePath(), a);
@@ -557,9 +631,51 @@ public class AudioPlayerManager {
                         main.currentAlbumColor = ThemeManager.getListButtonFocusedBg() | 0xFF000000;
                     }
                 } catch (Throwable e) {}
-            } else if (coverFile.exists()) {
+            }
+            // 🚀 팟캐스트 전용 지름길: 폴더에 cover.jpg가 있으면 즉시 로드! (초고해상도 압축 방어막 장착)
+            else if (isPodcast && podcastCoverFile != null && podcastCoverFile.exists()) {
+                try {
+                    // 1. 메모리에 올리기 전에 이미지의 '진짜 크기'만 몰래 알아옵니다.
+                    android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+                    opts.inJustDecodeBounds = true;
+                    android.graphics.BitmapFactory.decodeFile(podcastCoverFile.getAbsolutePath(), opts);
+
+                    // 2. 3000x3000 같은 괴물 해상도를 500x500 이하가 될 때까지 무자비하게 압축 비율(Scale)을 높입니다!
+                    int scale = 1;
+                    while (opts.outWidth / scale > 500 || opts.outHeight / scale > 500) {
+                        scale *= 2;
+                    }
+
+                    // 3. 계산된 가벼운 압축 비율로 진짜 이미지를 메모리에 올립니다. (9MB -> 100KB 수준으로 다이어트!)
+                    opts.inJustDecodeBounds = false;
+                    opts.inSampleSize = scale;
+                    android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeFile(podcastCoverFile.getAbsolutePath(), opts);
+
+                    main.ivAlbumArt.setImageBitmap(bmp);
+
+                    // 4. 홀쭉해진 이미지로 배경 블러(RenderScript)를 0.05초 만에 초고속 처리!
+                    android.graphics.Bitmap blurredBg = main.applyGaussianBlur(bmp);
+                    main.ivPlayerBgBlur.setImageBitmap(blurredBg);
+
+                    try {
+                        int centerX = bmp.getWidth() / 2;
+                        int centerY = (int) (bmp.getHeight() * 0.8);
+                        main.currentAlbumColor = bmp.getPixel(centerX, centerY) | 0xFF000000;
+                    } catch (Exception e) {
+                        main.currentAlbumColor = com.themoon.y1.ThemeManager.getListButtonFocusedBg() | 0xFF000000;
+                    }
+
+                    main.updateMainMenuBackground();
+                    main.refreshNowPlayingPreview();
+                } catch (Exception e) {
+                    main.applyCachedCoverArt(podcastCoverFile.getAbsolutePath()); // 에러 시 기존 방식 안전망
+                }
+            }
+            // 일반 음악 전용: Y1_Covers 폴더에 다운로드된 이미지가 있으면 로드
+            else if (coverFile.exists()) {
                 main.applyCachedCoverArt(coverFile.getAbsolutePath());
-            } else {
+            }
+            else {
                 // 🚀 [신규 장착!] (3순위) 파일 안에 사진은 없지만, 같은 폴더에 'cover.jpg'가 있을 때!
                 File folderCover = main.findFolderCover(track.getParentFile());
 
@@ -577,7 +693,9 @@ public class AudioPlayerManager {
                     boolean hasValidTags = (t != null && !t.trim().isEmpty()) && (a != null && !a.trim().isEmpty() && !a.contains("Unknown"));
 
                     boolean isAutoFetchEnabled = main.prefs.getBoolean("auto_fetch", true);
-                    if (isAutoFetchEnabled) {
+
+                    // 💡 팟캐스트는 AutoFetch(인터넷 검색)를 돌리지 않고 건너뜁니다! (시간 딜레이 원천 차단)
+                    if (!isPodcast && isAutoFetchEnabled) {
                         String searchQuery = hasValidTags ? (a + " " + t) : safeFileName.replace("-", " ").replace("_", " ");
                         main.fetchTrackInfoFromInternet(track, searchQuery, hasValidTags, t, a);
                     }
@@ -690,11 +808,10 @@ public class AudioPlayerManager {
                 if (main.currentIndex >= 0 && main.currentIndex < main.currentPlaylist.size()) {
                     String filePath = main.currentPlaylist.get(main.currentIndex).getAbsolutePath();
 
-                    // 오디오북 폴더이거나, 오디오북 모드일 때만 저장!
-                    if (filePath.startsWith("/storage/sdcard0/Audiobooks") || main.isAudiobookLibraryMode) {
+                    // 🚀 [수정] 오디오북 폴더, 팟캐스트 로컬 폴더, 팟캐스트 스트리밍 주소까지 모두 저장 허용!
+                    if (filePath.startsWith("/storage/sdcard0/Audiobooks") || filePath.contains("/Podcasts") || filePath.startsWith("/PODCAST_STREAM") || main.isAudiobookLibraryMode) {
                         AudiobookManager.getInstance(main).saveBookmark(filePath, getCurrentPosition(), main.currentIndex);
 
-                        // 🚀 [핵심 추가] 프로그레스 바를 그리기 위해 파일 주소를 열쇠로 '현재 위치'와 '총 길이'를 몰래 저장합니다.
                         main.prefs.edit()
                                 .putInt("book_pos_" + filePath, getCurrentPosition())
                                 .putInt("book_dur_" + filePath, getDuration())
