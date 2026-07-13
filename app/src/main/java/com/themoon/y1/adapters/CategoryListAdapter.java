@@ -179,9 +179,11 @@ public class CategoryListAdapter extends BaseAdapter {
                     btn.setBackground(MainActivity.instance.createButtonBackground(ThemeManager.getListButtonFocusedBg()));
                     btn.setTextColor(ThemeManager.getListButtonFocusedTextColor());
                     MainActivity.instance.showFastScrollLetter(name);
+                    btn.setSelected(true); // 🚀 추가! 텍스트 흐르기 가동
                 } else {
                     btn.setBackground(MainActivity.instance.createButtonBackground(ThemeManager.getListButtonNormalBg()));
                     btn.setTextColor(ThemeManager.getTextColorPrimary());
+                    btn.setSelected(false); // 🚀 추가! 텍스트 흐르기 정지
                 }
             }
         });

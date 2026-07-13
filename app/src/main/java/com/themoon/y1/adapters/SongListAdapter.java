@@ -190,16 +190,32 @@ public class SongListAdapter extends BaseAdapter {
                             savedPos = MainActivity.instance.prefs.getInt("book_pos_" + streamKey, 0);
                         }
 
-                        // 🚀 [치명적 버그 수정!]
-                        // 가짜 주소(/PODCAST)가 들어있는 리스트를 통째로 넘기지 않습니다.
-                        // 진짜 다운로드된 파일(localFile) 1개만 바구니에 담아서 안전하게 넘겨줍니다!
+                        // =======================================================
+                        // 🚀 [연속 재생 엔진 탑재!]
+                        // 현재 채널 리스트(items)를 훑어서 '다운로드된' 파일들만 싹 다 바구니에 담습니다.
+                        // =======================================================
                         java.util.List<java.io.File> playList = new java.util.ArrayList<>();
-                        playList.add(localFile);
+                        int targetIdx = 0;
 
+                        for (SongItem ep : items) {
+                            String epTitle = ep.title.replaceAll("[\\\\/:*?\"<>|]", "_") + ".mp3";
+                            java.io.File epFile = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel, epTitle);
+
+                            // 파일이 기기에 실제로 존재할 때만 바구니에 합류!
+                            if (epFile.exists() && epFile.length() > 0) {
+                                playList.add(epFile);
+                                // 지금 내가 누른 이 파일이 바구니의 몇 번째(인덱스)에 담겼는지 추적합니다.
+                                if (epFile.getAbsolutePath().equals(localFile.getAbsolutePath())) {
+                                    targetIdx = playList.size() - 1;
+                                }
+                            }
+                        }
+
+                        // 바구니 통째로(playList)와 내가 누른 곡 번호(targetIdx)를 엔진에 장전!
                         if (savedPos > 0) {
-                            com.themoon.y1.managers.AudioPlayerManager.getInstance().playTrackListWithOffset(playList, 0, savedPos);
+                            com.themoon.y1.managers.AudioPlayerManager.getInstance().playTrackListWithOffset(playList, targetIdx, savedPos);
                         } else {
-                            com.themoon.y1.managers.AudioPlayerManager.getInstance().playTrackList(playList, 0);
+                            com.themoon.y1.managers.AudioPlayerManager.getInstance().playTrackList(playList, targetIdx);
                         }
                         MainActivity.instance.changeScreen(3);
                     } else {
@@ -237,41 +253,61 @@ public class SongListAdapter extends BaseAdapter {
         return btn;
     }
     // 🚀 [신규] 유니코드 아이콘 뷰(LinearLayout)와 순정 버튼(Button)을 모두 지원하는 하이브리드 포커스 리스너!
-    // 파라미터로 customColor를 전달받아, 포커스가 빠졌을 때 고유 색상으로 완벽하게 복귀합니다!
     private void applyDefaultFocusListener(final android.view.View btn, final String title, final int customColor) {
         final int normalColor = (customColor != 0) ? customColor : com.themoon.y1.ThemeManager.getTextColorPrimary();
 
-        btn.setOnFocusChangeListener(new android.view.View.OnFocusChangeListener() {
+        // 1. 리스너를 미리 변수(listener)에 담아둡니다.
+        final android.view.View.OnFocusChangeListener listener = new android.view.View.OnFocusChangeListener() {
             @Override
             public void onFocusChange(android.view.View v, boolean hasFocus) {
                 if (hasFocus) {
                     btn.setBackground(MainActivity.instance.createButtonBackground(com.themoon.y1.ThemeManager.getListButtonFocusedBg()));
 
-                    // 💡 유니코드 뷰(LinearLayout)일 경우 아이콘과 텍스트를 모두 포커스 색상으로 변경!
                     if (v instanceof android.widget.LinearLayout) {
                         android.widget.LinearLayout row = (android.widget.LinearLayout) v;
                         if (row.getChildCount() > 1) {
                             ((android.widget.TextView) row.getChildAt(0)).setTextColor(com.themoon.y1.ThemeManager.getListButtonFocusedTextColor());
-                            ((android.widget.TextView) row.getChildAt(1)).setTextColor(com.themoon.y1.ThemeManager.getListButtonFocusedTextColor());
+                            android.widget.TextView tvText = (android.widget.TextView) row.getChildAt(1);
+                            tvText.setTextColor(com.themoon.y1.ThemeManager.getListButtonFocusedTextColor());
+                            tvText.setSelected(true); // 🚀 텍스트 흐르기 가동!
                         }
                     } else if (v instanceof android.widget.Button) {
                         ((android.widget.Button) v).setTextColor(com.themoon.y1.ThemeManager.getListButtonFocusedTextColor());
+                        v.setSelected(true); // 🚀 텍스트 흐르기 가동!
                     }
 
                     MainActivity.instance.showFastScrollLetter(title);
                 } else {
                     btn.setBackground(MainActivity.instance.createButtonBackground(com.themoon.y1.ThemeManager.getListButtonNormalBg()));
 
-                    // 💡 포커스가 벗어나면 원래 색상(또는 팟캐스트 고유의 초록/오렌지색)으로 완벽하게 복구!
                     if (v instanceof android.widget.LinearLayout) {
                         android.widget.LinearLayout row = (android.widget.LinearLayout) v;
                         if (row.getChildCount() > 1) {
                             ((android.widget.TextView) row.getChildAt(0)).setTextColor(normalColor);
-                            ((android.widget.TextView) row.getChildAt(1)).setTextColor(normalColor);
+                            android.widget.TextView tvText = (android.widget.TextView) row.getChildAt(1);
+                            tvText.setTextColor(normalColor);
+                            tvText.setSelected(false); // 🚀 텍스트 흐르기 정지!
                         }
                     } else if (v instanceof android.widget.Button) {
                         ((android.widget.Button) v).setTextColor(normalColor);
+                        v.setSelected(false); // 🚀 텍스트 흐르기 정지!
                     }
+                }
+            }
+        };
+
+        // 2. 버튼에 리스너를 장착!
+        btn.setOnFocusChangeListener(listener);
+
+        // =======================================================
+        // 🚀 [마키 버그 완벽 수리] 리스트 뷰 재활용 시 포커스 증발 방지 엔진!
+        // =======================================================
+        btn.post(new Runnable() {
+            @Override
+            public void run() {
+                // UI가 화면에 완전히 그려진 직후, 포커스를 쥐고 있다면 억지로 한 번 이벤트를 쏴서 깨워줍니다!
+                if (btn.isFocused()) {
+                    listener.onFocusChange(btn, true);
                 }
             }
         });

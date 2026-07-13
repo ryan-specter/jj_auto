@@ -207,7 +207,14 @@ public class AudioPlayerManager {
             }
         }
     }
-
+    // =======================================================
+    // 🚀 [신규 엔진] 메인 화면의 셔플 버튼을 눌렀을 때 ExoPlayer에 실시간으로 명령을 하달합니다!
+    // =======================================================
+    public void setShuffleMode(boolean isShuffle) {
+        if (exoPlayer != null && !isUsingLegacyPlayer) {
+            exoPlayer.setShuffleModeEnabled(isShuffle);
+        }
+    }
     public float getCurrentSpeed() { return currentSpeed; }
 
     private void handleTrackCompletion() {
