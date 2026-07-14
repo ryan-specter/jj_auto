@@ -193,12 +193,16 @@ public class Y1WebServer extends Thread {
                             "                      isText ? `onclick=\"openEditor(event, '${safePath}', '${f.name.replace(/'/g, \"\\\\'\")}')\"` : " +
                             "                      isImg ? `onclick=\"window.open('/api/file?path=${safePath}', '_blank')\"` : '';" +
 
+                            // (기존 코드)
                             "      let editBtn = isText ? `<button class='action' onclick=\"openEditor(event, '${safePath}', '${f.name.replace(/'/g, \"\\\\'\")}')\">Edit</button>` : '';" +
                             "      let renameBtn = `<button class='action' onclick=\"renameItem(event, '${f.name.replace(/'/g, \"\\\\'\")}')\">Rename</button>`;" +
 
+                            // 🚀 [여기서부터 수정!] 다운로드 버튼 변수를 새로 만들고, html += 조립 부분에 ${downloadBtn}을 끼워 넣습니다.
+                            "      let downloadBtn = f.isDir ? '' : `<button class='action' style='background:#81C784; color:#121212;' onclick=\"event.stopPropagation(); window.location.href='/api/download?path=${safePath}';\">⬇️ Down</button>`;" +
+
                             "      html += `<div class='item' ${rowAction}>` +" +
                             "              `<div class='item-left'>${iconHtml}<span class='item-name'>${f.name}</span></div>` +" +
-                            "              `<div class='btn-group'>${editBtn}${renameBtn}<button class='danger' onclick=\"deleteItem(event, '${f.name.replace(/'/g, \"\\\\'\")}')\">Delete</button></div>` +" +
+                            "              `<div class='btn-group'>${downloadBtn}${editBtn}${renameBtn}<button class='danger' onclick=\"deleteItem(event, '${f.name.replace(/'/g, \"\\\\'\")}')\">Delete</button></div>` +" +
                             "              `</div>`;" +
                             "    });" +
                             "    if(data.length===0 && currentPath === '') html += '<div style=\"padding:15px; color:#9E9E9E;\">No files found.</div>';" +
@@ -484,7 +488,31 @@ public class Y1WebServer extends Thread {
 
                     os.write("HTTP/1.1 200 OK\r\n\r\nOK".getBytes("UTF-8"));
                 }
+                else if (method.equals("GET") && path.startsWith("/api/download")) {
+                    String q = path.split("\\?")[1];
+                    String targetPath = URLDecoder.decode(q.substring(5), "UTF-8");
+                    File targetFile = new File(rootFolder, targetPath);
 
+                    if (!targetFile.exists() || targetFile.isDirectory()) {
+                        os.write("HTTP/1.1 404 Not Found\r\n\r\nNot Found".getBytes("UTF-8"));
+                    } else {
+                        // 💡 브라우저가 화면에 재생하지 않고 "무조건 파일로 저장"하게 만드는 Content-Disposition 헤더!
+                        String header = "HTTP/1.1 200 OK\r\n" +
+                                "Content-Type: application/octet-stream\r\n" +
+                                "Content-Disposition: attachment; filename=\"" + targetFile.getName() + "\"\r\n" +
+                                "Content-Length: " + targetFile.length() + "\r\n" +
+                                "Accept-Ranges: bytes\r\n\r\n";
+                        os.write(header.getBytes("UTF-8"));
+
+                        FileInputStream fis = new FileInputStream(targetFile);
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        while ((bytesRead = fis.read(buffer)) != -1) {
+                            os.write(buffer, 0, bytesRead);
+                        }
+                        fis.close();
+                    }
+                }
                 os.flush();
             } catch (Exception e) {}
             finally {

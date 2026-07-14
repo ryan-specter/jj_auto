@@ -39,6 +39,8 @@ public class SongListAdapter extends BaseAdapter {
         int customColor = 0;
 
         if (MainActivity.instance != null) {
+
+
             // ==========================================
             // 🚀 1. 팟캐스트 에피소드 모드 (시간 표시 및 로직 완벽 통합!)
             // ==========================================
@@ -81,13 +83,6 @@ public class SongListAdapter extends BaseAdapter {
                     displayTitle = datePrefix + song.title + progressText;
                 }
 
-                // ▶ 현재 재생 중인 에피소드 강조 (하늘색)
-//                if (com.themoon.y1.managers.AudioPlayerManager.getInstance().currentPlayingSong != null &&
-//                        com.themoon.y1.managers.AudioPlayerManager.getInstance().currentPlayingSong.genre != null &&
-//                        com.themoon.y1.managers.AudioPlayerManager.getInstance().currentPlayingSong.genre.equals(audioUrl)) {
-//                    displayTitle = "▶ " + displayTitle;
-//                    customColor = 0xFF00FFFF;
-//                }
             }
             // ==========================================
             // 📅 2. '최근 추가된 곡' 모드일 때
@@ -241,9 +236,10 @@ public class SongListAdapter extends BaseAdapter {
 
                 if (MainActivity.instance.currentBrowserMode == 5) {
                     MainActivity.instance.showRemoveFromFavoritesDialog(song.file);
-                } else if (MainActivity.instance.currentBrowserMode == 7) {
+                }else if (MainActivity.instance.currentBrowserMode == 7) {
                     MainActivity.instance.showRemoveFromPlaylistDialog(song.file);
-                } else {
+                }
+                 else {
                     MainActivity.instance.showAddToPlaylistDialog(song.file);
                 }
                 return true;
