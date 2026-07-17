@@ -36,9 +36,6 @@ public class AudioPlayerManager {
 
     // 🚀 [신규 엔진 2] 자연스러운 스피커 공간감을 구현할 크로스피드 DSP 장전!
     public Y1CrossfeedAudioProcessor crossfeedProcessor = new Y1CrossfeedAudioProcessor();
-    public MediaPlayer legacyPlayer;
-    public boolean isUsingLegacyPlayer = false;
-    private java.io.FileInputStream currentFileInputStream;
 
     private float currentSpeed = 1.0f;
 
@@ -110,25 +107,26 @@ public class AudioPlayerManager {
                     com.google.android.exoplayer2.audio.AudioCapabilities strict16BitCaps = new com.google.android.exoplayer2.audio.AudioCapabilities(new int[] { 2 }, 2);
                     com.google.android.exoplayer2.audio.AudioSink customSink = new com.google.android.exoplayer2.audio.DefaultAudioSink(strict16BitCaps, processors);
 
-                    // 🚀 4. [MTK 사형 선고 - 타겟 정밀 조준 복구!]
+                    // 🚀 4. [MTK 사형 선고 - 타겟 정밀 조준 복구 및 FLAC 추가!]
                     com.google.android.exoplayer2.mediacodec.MediaCodecSelector customSelector = new com.google.android.exoplayer2.mediacodec.MediaCodecSelector() {
                         @Override
                         public java.util.List<com.google.android.exoplayer2.mediacodec.MediaCodecInfo> getDecoderInfos(String mimeType, boolean requiresSecureDecoder, boolean requiresTunnelingDecoder) throws com.google.android.exoplayer2.mediacodec.MediaCodecUtil.DecoderQueryException {
                             java.util.List<com.google.android.exoplayer2.mediacodec.MediaCodecInfo> decoders = mediaCodecSelector.getDecoderInfos(mimeType, requiresSecureDecoder, requiresTunnelingDecoder);
 
-                            // 💡 [핵심 수정] MP3, WAV 등은 건드리지 않고, 오직 애플 포맷(m4a/aac/alac)일 때만 MTK 디코더를 박살냅니다!
-                            if (mimeType != null && (mimeType.contains("mp4a") || mimeType.contains("aac") || mimeType.contains("alac"))) {
+                            // 💡 [핵심 수정] 기존 애플 포맷에 "flac"까지 사형 명단에 전격 추가합니다!
+                            if (mimeType != null && (mimeType.contains("mp4a") || mimeType.contains("aac") || mimeType.contains("alac") || mimeType.contains("flac"))) {
                                 java.util.List<com.google.android.exoplayer2.mediacodec.MediaCodecInfo> safeDecoders = new java.util.ArrayList<>();
                                 for (com.google.android.exoplayer2.mediacodec.MediaCodecInfo info : decoders) {
+                                    // 🚨 고장 난 MTK 디코더가 발견되면 자비 없이 리스트에서 삭제!
                                     if (info.name != null && info.name.toLowerCase().contains("mtk")) {
-                                        continue; // 🚨 애플 포맷을 훔쳐가려는 MTK 디코더만 정확히 사형!
+                                        continue;
                                     }
                                     safeDecoders.add(info);
                                 }
                                 return safeDecoders;
                             }
 
-                            // 🟢 MP3 등 다른 모든 포맷은 시스템 순정 부품(MTK 포함)을 그대로 안전하게 통과시킵니다.
+                            // 🟢 MP3 등 다른 모든 포맷은 시스템 순정 부품을 그대로 안전하게 통과시킵니다.
                             return decoders;
                         }
                     };
@@ -144,21 +142,18 @@ public class AudioPlayerManager {
             // 팩토리를 넣어서 조립 완료!
             exoPlayer = new com.google.android.exoplayer2.SimpleExoPlayer.Builder(context.getApplicationContext(), renderersFactory).build();
 
-            // (이 아래의 리스너 코드들은 기존과 100% 동일하게 유지해 주세요!)
-            // (이 아래 리스너 코드들은 기존과 100% 동일하게 유지해 주세요!)
             exoPlayer.addListener(new Player.EventListener() {
                 @Override
                 public void onPlayerStateChanged(boolean playWhenReady, int playbackState) {
-                    if (playbackState == Player.STATE_READY && !isUsingLegacyPlayer) {
+                    if (playbackState == Player.STATE_READY) {
                         if (MainActivity.instance != null) {
                             MainActivity.instance.runOnUiThread(new Runnable() {
                                 @Override
                                 public void run() {
                                     try {
-                                        // 🚀 [버그 완벽 수리] 곡이 바뀌어 오디오 잭이 갱신될 때마다 EQ 설정도 잊지 않고 다시 주입합니다!
                                         if (AudioEffectManager.getInstance() != null) {
                                             AudioEffectManager.getInstance().applyAudioEffects();
-                                            AudioEffectManager.getInstance().applyEqProfile(); // 💡 이 한 줄이 추가되어야 소리가 바뀝니다!!
+                                            AudioEffectManager.getInstance().applyEqProfile();
                                         }
                                         MainActivity.instance.setupVisualizer();
 
@@ -166,7 +161,6 @@ public class AudioPlayerManager {
                                         int s = (duration / 1000) % 60;
                                         int m = (duration / (1000 * 60)) % 60;
                                         MainActivity.instance.tvPlayerTimeTotal.setText(String.format(Locale.US, "%02d:%02d", m, s));
-                                        // 🚀 [추가!] 곡 장전이 끝나서 정확한 duration이 나왔으므로, 이 시점에 비트레이트 캡슐을 다시 업데이트합니다!
                                         if (!MainActivity.instance.currentPlaylist.isEmpty()) {
                                             MainActivity.instance.updateAudioQualityInfo(MainActivity.instance.currentPlaylist.get(MainActivity.instance.currentIndex));
                                         }
@@ -174,22 +168,17 @@ public class AudioPlayerManager {
                                 }
                             });
                         }
-                    } else if (playbackState == Player.STATE_ENDED && !isUsingLegacyPlayer) {
+                    } else if (playbackState == Player.STATE_ENDED) {
                         handleTrackCompletion();
                     }
                     if (MainActivity.instance != null) {
-                        MainActivity.instance.runOnUiThread(new Runnable() {
-                            @Override
-                            public void run() {
-                                if (MainActivity.instance != null) MainActivity.instance.updatePlayerUI();
-                            }
-                        });
+                        MainActivity.instance.runOnUiThread(() -> MainActivity.instance.updatePlayerUI());
                     }
                 }
 
                 @Override
                 public void onPlayerError(com.google.android.exoplayer2.ExoPlaybackException error) {
-                    if (!isUsingLegacyPlayer) handleTrackError("Cannot play this file.");
+                    handleTrackError("Cannot play this file.");
                 }
             });
         }
@@ -197,21 +186,13 @@ public class AudioPlayerManager {
 
     public void setPlaybackSpeed(float speed) {
         this.currentSpeed = speed;
-        if (exoPlayer != null && !isUsingLegacyPlayer) {
+        if (exoPlayer != null) {
             exoPlayer.setPlaybackParameters(new PlaybackParameters(speed, 1.0f));
-        } else if (isUsingLegacyPlayer) {
-            if (MainActivity.instance != null) {
-                MainActivity.instance.runOnUiThread(() ->
-                        Toast.makeText(MainActivity.instance, "⚠️ Speed control is disabled for FLAC files on this device.", Toast.LENGTH_SHORT).show()
-                );
-            }
         }
     }
-    // =======================================================
-    // 🚀 [신규 엔진] 메인 화면의 셔플 버튼을 눌렀을 때 ExoPlayer에 실시간으로 명령을 하달합니다!
-    // =======================================================
+
     public void setShuffleMode(boolean isShuffle) {
-        if (exoPlayer != null && !isUsingLegacyPlayer) {
+        if (exoPlayer != null) {
             exoPlayer.setShuffleModeEnabled(isShuffle);
         }
     }
@@ -226,9 +207,7 @@ public class AudioPlayerManager {
                 try {
                     int repeatMode = main.prefs.getInt("repeat_mode", 0);
                     if (repeatMode == 1) {
-                        if (isUsingLegacyPlayer && legacyPlayer != null) {
-                            legacyPlayer.seekTo(0); legacyPlayer.start();
-                        } else if (exoPlayer != null) {
+                        if (exoPlayer != null) {
                             exoPlayer.seekTo(0); exoPlayer.setPlayWhenReady(true);
                         }
                     } else if (repeatMode == 2) {
@@ -251,12 +230,9 @@ public class AudioPlayerManager {
     private void handleTrackError(String errorMsg) {
         MainActivity main = MainActivity.instance;
         if (main == null) return;
-        main.runOnUiThread(new Runnable() {
-            @Override
-            public void run() {
-                Toast.makeText(main, "⚠️ " + errorMsg + " Skipping...", Toast.LENGTH_SHORT).show();
-                nextTrack();
-            }
+        main.runOnUiThread(() -> {
+            Toast.makeText(main, "⚠️ " + errorMsg + " Skipping...", Toast.LENGTH_SHORT).show();
+            nextTrack();
         });
     }
 
@@ -296,7 +272,7 @@ public class AudioPlayerManager {
             main.currentIndex = index;
         }
 // 🚀 [추가] ExoPlayer 엔진 자체에도 셔플 상태를 명확히 인지시킵니다!
-        if (!isUsingLegacyPlayer && exoPlayer != null) {
+        if (exoPlayer != null) {
             exoPlayer.setShuffleModeEnabled(isShuffle);
         }
         main.isPausedByHand = false; // 🚀 스위치를 미리 켜줍니다!
@@ -308,11 +284,9 @@ public class AudioPlayerManager {
         if (main == null) return;
 
         try {
-            if (legacyPlayer != null) { legacyPlayer.stop(); legacyPlayer.reset(); }
+            // 🚀 [레거시 찌꺼기 완벽 삭제!] 오직 무적의 ExoPlayer만 사용합니다!
             if (exoPlayer == null) initPlayer(main.getApplicationContext());
             else { exoPlayer.stop(); exoPlayer.clearMediaItems(); }
-
-            isUsingLegacyPlayer = false;
 
             // 🚀 [핵심 엔진] 스트리밍일 때도 '가짜(Dummy) 플레이리스트'를 만들어 시간을 기록하게 속입니다!
             String safeChannel = channelName.replaceAll("[\\\\/:*?\"<>|]", "_");
@@ -341,29 +315,65 @@ public class AudioPlayerManager {
                 main.tvPlayerArtist.setText(channelName); // 가수에 팟캐스트 채널명 표시
                 main.ivAlbumArt.setImageResource(R.drawable.default_album);
                 main.ivPlayerBgBlur.setImageResource(0);
+                main.lastAlbumArtBytes = null; // 🚀 스캔 전 찌꺼기 이미지 초기화!
                 main.updatePlayerUI();
             });
 
-            // (앨범 아트 백그라운드 다운로드 코드는 이전과 동일하게 유지!)
-            if (imageUrl != null && !imageUrl.isEmpty()) {
-                new Thread(() -> {
-                    try {
+            // =======================================================
+            // 🚀 [썸네일 엔진 대개조] 인터넷 이미지 + 로컬 커버 호환 및 금고 저장!
+            // =======================================================
+            new Thread(() -> {
+                android.graphics.Bitmap bmp = null;
+                try {
+                    // 1. 에피소드 전용 이미지 URL이 있다면 우선순위로 다운로드 시도!
+                    if (imageUrl != null && !imageUrl.isEmpty()) {
                         java.net.URL imgUrl = new java.net.URL(imageUrl);
                         java.net.HttpURLConnection conn = (java.net.HttpURLConnection) imgUrl.openConnection();
                         conn.setDoInput(true); conn.connect();
-                        final android.graphics.Bitmap bmp = android.graphics.BitmapFactory.decodeStream(conn.getInputStream());
-                        if (bmp != null) {
-                            main.runOnUiThread(() -> {
-                                main.ivAlbumArt.setImageBitmap(bmp);
-                                android.graphics.Bitmap blurredBg = main.applyGaussianBlur(bmp);
-                                main.ivPlayerBgBlur.setImageBitmap(blurredBg);
-                                main.currentAlbumColor = bmp.getPixel(bmp.getWidth()/2, (int)(bmp.getHeight()*0.8)) | 0xFF000000;
-                                main.updateMainMenuBackground();
-                            });
+                        bmp = android.graphics.BitmapFactory.decodeStream(conn.getInputStream());
+                    }
+
+                    // 2. 에피소드 전용 이미지가 없다면? 우리가 기기에 이미 받아둔 채널 간판(cover.jpg)을 띄웁니다!
+                    if (bmp == null) {
+                        java.io.File coverFile = new java.io.File("/storage/sdcard0/Podcasts/" + safeChannel, "cover.jpg");
+                        if (coverFile.exists()) {
+                            android.graphics.BitmapFactory.Options opts = new android.graphics.BitmapFactory.Options();
+                            opts.inJustDecodeBounds = true;
+                            android.graphics.BitmapFactory.decodeFile(coverFile.getAbsolutePath(), opts);
+                            int scale = 1;
+                            while (opts.outWidth / scale > 500 || opts.outHeight / scale > 500) { scale *= 2; }
+                            opts.inJustDecodeBounds = false;
+                            opts.inSampleSize = scale;
+                            bmp = android.graphics.BitmapFactory.decodeFile(coverFile.getAbsolutePath(), opts);
                         }
-                    } catch (Exception e) {}
-                }).start();
-            }
+                    }
+
+                    // 3. 비트맵을 성공적으로 가져왔다면 화면에 바인딩 및 영구 보존!
+                    if (bmp != null) {
+                        final android.graphics.Bitmap finalBmp = bmp;
+                        main.runOnUiThread(() -> {
+                            main.ivAlbumArt.setImageBitmap(finalBmp);
+                            android.graphics.Bitmap blurredBg = main.applyGaussianBlur(finalBmp);
+                            main.ivPlayerBgBlur.setImageBitmap(blurredBg);
+                            try {
+                                main.currentAlbumColor = finalBmp.getPixel(finalBmp.getWidth()/2, (int)(finalBmp.getHeight()*0.8)) | 0xFF000000;
+                            } catch (Exception ex) {
+                                main.currentAlbumColor = com.themoon.y1.ThemeManager.getListButtonFocusedBg() | 0xFF000000;
+                            }
+
+                            // 🚀 [핵심 해결] ExoPlayer 로딩 완료 후 UI가 갱신될 때 이미지가 증발하지 않도록 바이트로 변환해 금고에 저장합니다!
+                            try {
+                                java.io.ByteArrayOutputStream stream = new java.io.ByteArrayOutputStream();
+                                finalBmp.compress(android.graphics.Bitmap.CompressFormat.JPEG, 80, stream);
+                                main.lastAlbumArtBytes = stream.toByteArray();
+                            } catch (Exception e) {}
+
+                            main.updateMainMenuBackground();
+                            main.refreshNowPlayingPreview(); // 🚀 메인 화면의 미니 프리뷰 위젯에도 썸네일 동기화!
+                        });
+                    }
+                } catch (Exception e) {}
+            }).start();
 
             exoPlayer.setPlayWhenReady(true);
 
@@ -423,16 +433,7 @@ public class AudioPlayerManager {
     }
 
     public void playOrPauseMusic() {
-        if (isUsingLegacyPlayer && legacyPlayer != null) {
-            if (legacyPlayer.isPlaying()) {
-                saveAudiobookBookmarkIfNeeded();
-                legacyPlayer.pause();
-                if (MainActivity.instance != null) MainActivity.instance.isPausedByHand = true;
-            } else {
-                legacyPlayer.start();
-                if (MainActivity.instance != null) MainActivity.instance.isPausedByHand = false;
-            }
-        } else if (exoPlayer != null) {
+        if (exoPlayer != null) {
             if (exoPlayer.getPlayWhenReady()) {
                 saveAudiobookBookmarkIfNeeded();
                 exoPlayer.setPlayWhenReady(false);
@@ -444,7 +445,6 @@ public class AudioPlayerManager {
         }
         if (MainActivity.instance != null) MainActivity.instance.updatePlayerUI();
     }
-
     public void nextTrack() {
         saveAudiobookBookmarkIfNeeded();
         MainActivity main = MainActivity.instance;
@@ -467,19 +467,15 @@ public class AudioPlayerManager {
     }
 
     public void seekRelative(int offsetMs) {
-        long currentPos = getCurrentPosition();
-        long duration = getDuration();
-        long targetPos = currentPos + offsetMs;
-        if (targetPos < 0) targetPos = 0;
-        if (targetPos > duration && duration > 0) targetPos = duration;
-
-        if (isUsingLegacyPlayer && legacyPlayer != null) {
-            legacyPlayer.seekTo((int) targetPos);
-        } else if (exoPlayer != null) {
+        if (exoPlayer != null) {
+            long currentPos = getCurrentPosition();
+            long duration = getDuration();
+            long targetPos = currentPos + offsetMs;
+            if (targetPos < 0) targetPos = 0;
+            if (targetPos > duration && duration > 0) targetPos = duration;
             exoPlayer.seekTo(targetPos);
         }
     }
-
     // 🚀 [순정 및 동기화 완벽 복원] 번쩍이는 딜레이를 아예 없앴습니다!
     public void prepareMusicTrack(int index) {
         final MainActivity main = MainActivity.instance;
@@ -518,7 +514,7 @@ public class AudioPlayerManager {
         main.tvPlayerTimeTotal.setText("00:00");
 
         String ext = track.getName().toLowerCase();
-        isUsingLegacyPlayer = false;
+     //   isUsingLegacyPlayer = false;
         boolean isOpus = ext.endsWith(".opus");
         boolean isFlac = ext.endsWith(".flac"); // 🚀 FLAC 판별기 신규 추가!
 
@@ -712,75 +708,32 @@ public class AudioPlayerManager {
 
         // 🚀 (이 아래 try { if (isUsingLegacyPlayer) ... 엔진 가동 로직은 기존 코드 100% 동일하게 유지!)
 
-        // 🚀 엔진 가동 구간
+        // ==========================================
+        // 🚀 [3구역] 순수 ExoPlayer (FFmpeg) 재생 엔진 가동!
+        // ==========================================
         try {
-            if (isUsingLegacyPlayer) {
-                // FLAC: 데드락 구출용 특수 엔진
-                if (exoPlayer != null) { exoPlayer.stop(); exoPlayer.clearMediaItems(); }
+            if (exoPlayer == null) initPlayer(main.getApplicationContext());
+            else exoPlayer.stop();
 
-                if (legacyPlayer == null) {
-                    legacyPlayer = new MediaPlayer();
-                    legacyPlayer.setWakeMode(main.getApplicationContext(), PowerManager.PARTIAL_WAKE_LOCK);
-                    legacyPlayer.setAudioStreamType(AudioManager.STREAM_MUSIC);
-                    legacyPlayer.setOnCompletionListener(mp -> handleTrackCompletion());
-                    legacyPlayer.setOnErrorListener((mp, what, extra) -> {
-                        handleTrackError("Legacy Player Error: " + what);
-                        return true;
-                    });
-                } else {
-                    legacyPlayer.reset();
-                }
+            com.google.android.exoplayer2.MediaItem mediaItem = com.google.android.exoplayer2.MediaItem.fromUri(Uri.fromFile(track));
+            DataSource.Factory dataSourceFactory = new DefaultDataSourceFactory(main, Util.getUserAgent(main, "Y1_Launcher"));
+            DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true);
+            MediaSource mediaSource = new ProgressiveMediaSource.Factory(dataSourceFactory, extractorsFactory).createMediaSource(mediaItem);
 
-                if (currentFileInputStream != null) {
-                    try { currentFileInputStream.close(); } catch (Exception e) {}
-                }
-                currentFileInputStream = new java.io.FileInputStream(track);
-                legacyPlayer.setDataSource(currentFileInputStream.getFD());
-                legacyPlayer.prepare(); // 💡 장전 완료!
+            exoPlayer.setMediaSource(mediaSource);
+            exoPlayer.prepare(); // 💡 장전 완료!
 
-                // 🚀 [핵심 로직 1] 쏘기 직전, 오디오북인지 검사하고 기억해둔 시간으로 강제 점프!
-                int savedPos = main.prefs.getInt("book_pos_" + track.getAbsolutePath(), 0);
-                if (savedPos > 0 && (main.isAudiobookLibraryMode || track.getAbsolutePath().contains("/Audiobooks"))) {
-                    legacyPlayer.seekTo(savedPos);
-                }
+            boolean isShuffle = main.prefs.getBoolean("shuffle", false);
+            exoPlayer.setShuffleModeEnabled(isShuffle);
 
-                if (!main.isPausedByHand) legacyPlayer.start();
-
-                if (AudioEffectManager.getInstance() != null) AudioEffectManager.getInstance().applyAudioEffects();
-                main.setupVisualizer();
-
-                int duration = legacyPlayer.getDuration();
-                int s = (duration / 1000) % 60;
-                int m = (duration / (1000 * 60)) % 60;
-                main.tvPlayerTimeTotal.setText(String.format(Locale.US, "%02d:%02d", m, s));
-
-            } else {
-                // MP3/WAV: 초고속 ExoPlayer
-                if (legacyPlayer != null) { legacyPlayer.stop(); legacyPlayer.reset(); }
-
-                if (exoPlayer == null) initPlayer(main.getApplicationContext());
-                else exoPlayer.stop();
-
-                com.google.android.exoplayer2.MediaItem mediaItem = com.google.android.exoplayer2.MediaItem.fromUri(Uri.fromFile(track));
-                DataSource.Factory dataSourceFactory = new DefaultDataSourceFactory(main, Util.getUserAgent(main, "Y1_Launcher"));
-                DefaultExtractorsFactory extractorsFactory = new DefaultExtractorsFactory().setConstantBitrateSeekingEnabled(true);
-                MediaSource mediaSource = new ProgressiveMediaSource.Factory(dataSourceFactory, extractorsFactory).createMediaSource(mediaItem);
-
-                exoPlayer.setMediaSource(mediaSource);
-                exoPlayer.prepare(); // 💡 장전 완료!
-// 🚀 [추가 확인사살] 곡을 장전할 때마다 현재 셔플 상태를 엑소 엔진에 강제 주입!
-                boolean isShuffle = main.prefs.getBoolean("shuffle", false);
-                exoPlayer.setShuffleModeEnabled(isShuffle);
-                // 🚀 [핵심 로직 2] 쏘기 직전, 오디오북인지 검사하고 기억해둔 시간으로 강제 점프!
-                int savedPos = main.prefs.getInt("book_pos_" + track.getAbsolutePath(), 0);
-                if (savedPos > 0 && (main.isAudiobookLibraryMode || track.getAbsolutePath().contains("/Audiobooks"))) {
-                    exoPlayer.seekTo(savedPos);
-                }
-
-                exoPlayer.setPlaybackParameters(new PlaybackParameters(currentSpeed, 1.0f));
-
-                if (!main.isPausedByHand) exoPlayer.setPlayWhenReady(true);
+            int savedPos = main.prefs.getInt("book_pos_" + track.getAbsolutePath(), 0);
+            if (savedPos > 0 && (main.isAudiobookLibraryMode || track.getAbsolutePath().contains("/Audiobooks"))) {
+                exoPlayer.seekTo(savedPos);
             }
+
+            exoPlayer.setPlaybackParameters(new PlaybackParameters(currentSpeed, 1.0f));
+
+            if (!main.isPausedByHand) exoPlayer.setPlayWhenReady(true);
 
             main.consecutiveErrorCount = 0;
             String currentTrackNum = String.format(Locale.US, "%02d", index + 1);
@@ -829,9 +782,9 @@ public class AudioPlayerManager {
         } catch (Exception e) {}
     }
 
+
     public int getCurrentPosition() {
-        if (isUsingLegacyPlayer && legacyPlayer != null) return legacyPlayer.getCurrentPosition();
-        if (!isUsingLegacyPlayer && exoPlayer != null) {
+        if (exoPlayer != null) {
             long pos = exoPlayer.getCurrentPosition();
             return pos < 0 ? 0 : (int) pos;
         }
@@ -839,8 +792,7 @@ public class AudioPlayerManager {
     }
 
     public int getDuration() {
-        if (isUsingLegacyPlayer && legacyPlayer != null) return legacyPlayer.getDuration();
-        if (!isUsingLegacyPlayer && exoPlayer != null) {
+        if (exoPlayer != null) {
             long duration = exoPlayer.getDuration();
             return duration < 0 ? 0 : (int) duration;
         }
@@ -848,21 +800,17 @@ public class AudioPlayerManager {
     }
 
     public boolean isPlaying() {
-        if (isUsingLegacyPlayer && legacyPlayer != null) return legacyPlayer.isPlaying();
-        if (!isUsingLegacyPlayer && exoPlayer != null) return exoPlayer.getPlayWhenReady();
+        if (exoPlayer != null) return exoPlayer.getPlayWhenReady();
         return false;
     }
 
     public int getAudioSessionId() {
-        if (isUsingLegacyPlayer && legacyPlayer != null) return legacyPlayer.getAudioSessionId();
-        if (!isUsingLegacyPlayer && exoPlayer != null) return exoPlayer.getAudioSessionId();
+        if (exoPlayer != null) return exoPlayer.getAudioSessionId();
         return 0;
     }
 
     public void releasePlayer() {
         if (exoPlayer != null) { exoPlayer.release(); exoPlayer = null; }
-        if (legacyPlayer != null) { legacyPlayer.release(); legacyPlayer = null; }
-        if (currentFileInputStream != null) { try { currentFileInputStream.close(); } catch (Exception e) {} }
     }
 
     // =======================================================

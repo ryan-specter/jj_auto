@@ -133,6 +133,7 @@ public class ThemeManager {
 
         defaultTheme.menuElements.add(new MenuElement("btn_coverflow", "button", "main_scroll_list", "", 0, 8, -1, 48, "Cover Flow", "Cover Flow", "〉", "", "", "", "", "cover.png", "OPEN_COVER_FLOW", "top|left", -1, 1, 22, -1, "bottom", "left", "#00000000", 0, 0, 0, 1.0f));
         defaultTheme.menuElements.add(new MenuElement("btn_music", "button", "main_scroll_list", "", 0, 8, -1, 48, "Music", "Music", "〉", "", "", "", "", "music_list.png", "OPEN_BROWSER", "top|left", -1, 2, 22, -1, "bottom", "left", "#00000000", 0, 0, 0, 1.0f));
+        defaultTheme.menuElements.add(new MenuElement("btn_video", "button", "main_scroll_list", "", 0, 8, -1, 48, "Videos", "Videos", "〉", "", "", "", "", "video_circle.png", "OPEN_VIDEOS", "top|left", -1, 2, 22, -1, "bottom", "left", "#00000000", 0, 0, 0, 1.0f));
 
 // 🚀 [신규 추가] Playlists 다이렉트 숏컷 (포커스 인덱스: 2번)
         defaultTheme.menuElements.add(new MenuElement("btn_playlist", "button", "main_scroll_list", "", 0, 8, -1, 48, "Playlists", "Playlists", "〉", "", "", "", "", "playlist.png", "OPEN_PLAYLISTS", "top|left", -1, 3, 22, -1, "bottom", "left", "#00000000", 0, 0, 0, 1.0f));
