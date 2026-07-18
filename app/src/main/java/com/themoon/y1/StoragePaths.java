@@ -42,9 +42,14 @@ public final class StoragePaths {
     public static boolean hasSecondaryStorage() {
         if (cachedSecondaryAvailable != null)
             return cachedSecondaryAvailable;
+        // Prefer a usable FUSE mount; fall back to the slot stub so scans still
+        // probe Music/ once remount succeeds after invalidate().
         boolean available = false;
         try {
-            available = new File(SECONDARY_PATH).exists();
+            if (com.themoon.y1.managers.ExternalSdMountMonitor.isSecondaryReady())
+                available = true;
+            else
+                available = new File(SECONDARY_PATH).exists();
         } catch (Exception ignored) {
         }
         cachedSecondaryAvailable = available;

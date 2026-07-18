@@ -456,6 +456,7 @@ public class MainActivity extends Activity {
     private boolean isTargetWifiOpen = false;
     // 💡 미디어 스캐너가 현재 작업 중인지 추적하는 변수
     private boolean isMediaScanning = false;
+    private com.themoon.y1.managers.ExternalSdMountMonitor externalSdMountMonitor;
     private AudioManager audioManager;
     private File rootFolder = StoragePaths.getMusicDir();
     private File currentFolder = rootFolder;
@@ -1496,6 +1497,23 @@ public class MainActivity extends Activity {
         if (customLibrary.isEmpty() && !isCustomScanning) {
             startMediaLibraryScan();
         }
+
+        // Y2 MicroSD watchdog: remount /storage/sdcard1 when FUSE drops, then rescan.
+        externalSdMountMonitor = new com.themoon.y1.managers.ExternalSdMountMonitor(this);
+        externalSdMountMonitor.setListener(new com.themoon.y1.managers.ExternalSdMountMonitor.Listener() {
+            @Override
+            public void onSecondaryStorageReady() {
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!isCustomScanning)
+                            startMediaLibraryScan();
+                    }
+                });
+            }
+        });
+        externalSdMountMonitor.start();
+
         layoutMainMenu = findViewById(R.id.layout_main_menu);
         ivMainBg = findViewById(R.id.iv_main_bg);
         ivMenuPreview = findViewById(R.id.iv_menu_preview);
@@ -10719,6 +10737,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        if (externalSdMountMonitor != null) {
+            externalSdMountMonitor.stop();
+            externalSdMountMonitor = null;
+        }
         clockHandler.removeCallbacks(clockTask);
         progressHandler.removeCallbacks(updateProgressTask);
         volumeHandler.removeCallbacks(hideVolumeTask);

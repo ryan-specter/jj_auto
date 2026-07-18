@@ -1,13 +1,21 @@
 #!/usr/bin/env bash
-# Compare upstream y1_launcher releases with published jj_auto ROM releases.
+# Compare upstream launcher releases with published ROM releases.
 # Usage: prepare-build-matrix.sh <all|new_only>
+#
+# Env:
+#   ROM_REPO              Where ROM releases are published (default: this fork)
+#   LAUNCHER_REPO         Upstream APK source (default: ismileblue/y1_launcher)
+#   MIN_LAUNCHER_VERSION  Only build tags >= this semver (default: 0.11.2)
+#                         Y2 MicroSD / StoragePaths support starts at 0.11.2.
 #
 # Writes releases.json and, when GITHUB_OUTPUT is set:
 #   has_new, matrix, latest_tag
 set -euo pipefail
 
 MODE="${1:-new_only}"
-ROM_REPO="${ROM_REPO:-ryan-specter/jj_y2}"
+ROM_REPO="${ROM_REPO:-ryan-specter/jj_auto}"
+LAUNCHER_REPO="${LAUNCHER_REPO:-ismileblue/y1_launcher}"
+MIN_LAUNCHER_VERSION="${MIN_LAUNCHER_VERSION:-0.11.2}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 if [ "$MODE" != "all" ] && [ "$MODE" != "new_only" ]; then
@@ -24,15 +32,17 @@ require_cmd() {
 
 require_cmd python3
 
+export LAUNCHER_REPO
 "$SCRIPT_DIR/list-launcher-releases.sh" > releases.json
 
-python3 - "$MODE" "$ROM_REPO" <<'PY'
+python3 - "$MODE" "$ROM_REPO" "$MIN_LAUNCHER_VERSION" <<'PY'
 import json
 import os
+import re
 import sys
 import urllib.request
 
-mode, rom_repo = sys.argv[1:3]
+mode, rom_repo, min_version = sys.argv[1:4]
 with open("releases.json", encoding="utf-8") as handle:
     upstream = json.load(handle)
 
@@ -45,6 +55,37 @@ headers = {
     "Accept": "application/vnd.github+json",
     "User-Agent": "jj-launcher-rom-build/1.0",
 }
+
+
+def parse_semver(tag: str):
+    """Return (major, minor, patch) or None if not a version-like tag."""
+    raw = tag.strip()
+    if raw.startswith("launcher-"):
+        raw = raw[len("launcher-") :]
+    if raw.startswith("v") or raw.startswith("V"):
+        raw = raw[1:]
+    # Allow tags like 0.11.2, 0.11.2-y2, 0.11
+    m = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?", raw)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2)), int(m.group(3) or 0)
+
+
+min_tuple = parse_semver(min_version)
+if min_tuple is None:
+    raise SystemExit(f"invalid MIN_LAUNCHER_VERSION: {min_version}")
+
+filtered = []
+skipped = []
+for item in upstream:
+    ver = parse_semver(item["tag"])
+    if ver is None or ver < min_tuple:
+        skipped.append(item["tag"])
+        continue
+    filtered.append(item)
+
+print(f"MIN_LAUNCHER_VERSION={min_version} -> skipped pre-Y2 tags: {skipped}")
+upstream = filtered
 
 existing = set()
 page = 1
@@ -80,7 +121,8 @@ matrix = [
 ]
 
 print(f"Mode: {mode}")
-print(f"Upstream releases: {[item['tag'] for item in upstream]}")
+print(f"ROM_REPO: {rom_repo}")
+print(f"Upstream releases (>= {min_version}): {[item['tag'] for item in upstream]}")
 print(f"Published ROM releases: {sorted(existing)}")
 print(f"Build targets: {[item['tag'] for item in build_items]}")
 

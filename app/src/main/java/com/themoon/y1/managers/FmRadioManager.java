@@ -68,6 +68,11 @@ public class FmRadioManager {
         return instance;
     }
 
+    /** Stream used for FM volume keys / UI (MediaPlayer path → MUSIC). */
+    public int getFmStreamType() {
+        return AudioManager.STREAM_MUSIC;
+    }
+
     private Method getNativeMethod(String name, Class<?>... parameterTypes) throws NoSuchMethodException {
         Class<?> clazz = fmNativeClass;
         while (clazz != null) {

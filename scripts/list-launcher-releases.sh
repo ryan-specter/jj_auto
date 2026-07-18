@@ -19,7 +19,7 @@ import os
 import sys
 import urllib.request
 
-api_url = "https://api.github.com/repos/ismileblue/y1_launcher/releases?per_page=100"
+api_url = f"https://api.github.com/repos/{os.environ.get('LAUNCHER_REPO', 'ismileblue/y1_launcher')}/releases?per_page=100"
 headers = {
     "Accept": "application/vnd.github+json",
     "User-Agent": "jj-launcher-rom-build/1.0",
@@ -33,6 +33,7 @@ request = urllib.request.Request(api_url, headers=headers)
 with urllib.request.urlopen(request) as response:
     releases = json.load(response)
 
+launcher_repo = os.environ.get("LAUNCHER_REPO", "ismileblue/y1_launcher")
 items = []
 for release in releases:
     if release.get("draft"):
@@ -55,6 +56,7 @@ for release in releases:
         "body": release.get("body") or "",
         "html_url": release.get("html_url", ""),
         "published_at": release.get("published_at", ""),
+        "launcher_repo": launcher_repo,
     })
 
 items.sort(key=lambda item: item.get("published_at") or item["tag"])
