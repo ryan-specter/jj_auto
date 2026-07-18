@@ -2,32 +2,39 @@
 # Build a flattened ROM job matrix from launcher APK releases.
 # Usage: prepare-build-matrix.sh <all|new_only>
 #
-# Rules (upstreamable to ismileblue/y1_launcher):
-#   version <  Y2_MIN (default 0.11.2)
-#       → APK from ismileblue/y1_launcher, ROM types a + b only (Y1)
-#   version >= Y2_MIN
-#       → APK from this repo when not ismileblue; types a + b + y2
-#       → when GITHUB_REPOSITORY is ismileblue/y1_launcher: APK from self, types a+b+y2
+# ryan-specter fork (default):
+#   <  Y2_MIN  → APK from ismileblue/y1_launcher → types a,b only
+#                release tag: launcher-{tag}  (Y1 ROMs as upstream intended)
+#   >= Y2_MIN  → APK from this fork → type y2 only
+#                release tag: launcher-{tag}-y2  (separate Y2 release)
+#
+# ismileblue/y1_launcher (upstream):
+#   all tags from self → types a,b
+#   >= Y2_MIN also gets type y2
+#   release tag: launcher-{tag} with a/b (+ y2 when eligible)
 #
 # Env:
-#   ROM_REPO              Where ROM releases are published
-#   Y1_LAUNCHER_REPO      Source of pre-Y2 APKs (default: ismileblue/y1_launcher)
-#   Y2_LAUNCHER_REPO      Source of Y2-capable APKs (default: GITHUB_REPOSITORY / ryan-specter/jj_auto)
-#   Y2_MIN_VERSION        First version that may receive type y2 (default: 0.11.2)
+#   ROM_REPO, Y1_LAUNCHER_REPO, Y2_LAUNCHER_REPO, Y2_MIN_VERSION, GITHUB_REPOSITORY
 #
-# Writes releases.json and GITHUB_OUTPUT: has_new, matrix, release_matrix, latest_tag
+# GITHUB_OUTPUT: has_new, matrix, release_matrix, latest_tag
 set -euo pipefail
 
 MODE="${1:-new_only}"
 ROM_REPO="${ROM_REPO:-${GITHUB_REPOSITORY:-ryan-specter/jj_auto}}"
 Y1_LAUNCHER_REPO="${Y1_LAUNCHER_REPO:-ismileblue/y1_launcher}"
 Y2_MIN_VERSION="${Y2_MIN_VERSION:-0.11.2}"
-# On ismileblue, Y2 APKs come from the same repo; on the fork, from this fork's releases.
+GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-ryan-specter/jj_auto}"
+
+IS_UPSTREAM=0
+if [ "$GITHUB_REPOSITORY" = "ismileblue/y1_launcher" ]; then
+    IS_UPSTREAM=1
+fi
+
 if [ -z "${Y2_LAUNCHER_REPO:-}" ]; then
-    if [ "${GITHUB_REPOSITORY:-}" = "ismileblue/y1_launcher" ]; then
+    if [ "$IS_UPSTREAM" = "1" ]; then
         Y2_LAUNCHER_REPO="ismileblue/y1_launcher"
     else
-        Y2_LAUNCHER_REPO="${GITHUB_REPOSITORY:-ryan-specter/jj_auto}"
+        Y2_LAUNCHER_REPO="$GITHUB_REPOSITORY"
     fi
 fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,16 +53,15 @@ require_cmd() {
 
 require_cmd python3
 
-export Y1_LAUNCHER_REPO Y2_LAUNCHER_REPO
-
-python3 - "$MODE" "$ROM_REPO" "$Y1_LAUNCHER_REPO" "$Y2_LAUNCHER_REPO" "$Y2_MIN_VERSION" <<'PY'
+python3 - "$MODE" "$ROM_REPO" "$Y1_LAUNCHER_REPO" "$Y2_LAUNCHER_REPO" "$Y2_MIN_VERSION" "$IS_UPSTREAM" <<'PY'
 import json
 import os
 import re
 import sys
 import urllib.request
 
-mode, rom_repo, y1_repo, y2_repo, y2_min = sys.argv[1:6]
+mode, rom_repo, y1_repo, y2_repo, y2_min, is_upstream_s = sys.argv[1:7]
+is_upstream = is_upstream_s == "1"
 token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
 if not token:
     raise SystemExit("GITHUB_TOKEN is required")
@@ -71,6 +77,8 @@ def parse_semver(tag: str):
     raw = tag.strip()
     if raw.startswith("launcher-"):
         raw = raw[len("launcher-") :]
+    if raw.endswith("-y2"):
+        raw = raw[: -len("-y2")]
     if raw.startswith("v") or raw.startswith("V"):
         raw = raw[1:]
     m = re.match(r"^(\d+)\.(\d+)(?:\.(\d+))?", raw)
@@ -87,6 +95,10 @@ def fetch_apk_releases(repo: str):
     items = []
     for release in releases:
         if release.get("draft"):
+            continue
+        # Skip our own Y2-only ROM packaging tags if they appear as releases with APKs.
+        tag = release.get("tag_name", "")
+        if tag.startswith("launcher-") and tag.endswith("-y2"):
             continue
         apk_assets = [
             a for a in release.get("assets", [])
@@ -112,32 +124,54 @@ y2_min_tuple = parse_semver(y2_min)
 if y2_min_tuple is None:
     raise SystemExit(f"invalid Y2_MIN_VERSION: {y2_min}")
 
-# Catalog: Y1-only tags from upstream ismileblue; Y2-capable from fork/self.
 y1_items = fetch_apk_releases(y1_repo)
 y2_items = fetch_apk_releases(y2_repo)
 
-by_tag = {}
-for item in y1_items:
-    ver = parse_semver(item["tag"])
-    if ver is None:
-        continue
-    if ver < y2_min_tuple:
-        item = dict(item)
-        item["types"] = ["a", "b"]
-        by_tag[item["tag"]] = item
+# Each entry: launcher tag + rom types + release_tag (GitHub release name for the ROMs)
+catalog = []
 
-for item in y2_items:
-    ver = parse_semver(item["tag"])
-    if ver is None:
-        continue
-    if ver >= y2_min_tuple:
-        item = dict(item)
-        item["types"] = ["a", "b", "y2"]
-        by_tag[item["tag"]] = item
+if is_upstream:
+    # Upstream: build a/b for all self tags; add y2 only for >= Y2_MIN.
+    for item in y2_items:  # self repo
+        ver = parse_semver(item["tag"])
+        if ver is None:
+            continue
+        types = ["a", "b"]
+        if ver >= y2_min_tuple:
+            types.append("y2")
+        entry = dict(item)
+        entry["types"] = types
+        entry["release_tag"] = f"launcher-{item['tag']}"
+        entry["include_y2"] = "y2" in types
+        entry["y2_only"] = False
+        catalog.append(entry)
+else:
+    # Fork: restore Y1 line from ismileblue (< Y2_MIN → a/b only).
+    for item in y1_items:
+        ver = parse_semver(item["tag"])
+        if ver is None or ver >= y2_min_tuple:
+            continue
+        entry = dict(item)
+        entry["types"] = ["a", "b"]
+        entry["release_tag"] = f"launcher-{item['tag']}"
+        entry["include_y2"] = False
+        entry["y2_only"] = False
+        catalog.append(entry)
 
-catalog = sorted(by_tag.values(), key=lambda i: i.get("published_at") or i["tag"])
+    # Fork: separate Y2 releases from this fork's APKs (>= Y2_MIN → y2 only).
+    for item in y2_items:
+        ver = parse_semver(item["tag"])
+        if ver is None or ver < y2_min_tuple:
+            continue
+        entry = dict(item)
+        entry["types"] = ["y2"]
+        entry["release_tag"] = f"launcher-{item['tag']}-y2"
+        entry["include_y2"] = True
+        entry["y2_only"] = True
+        catalog.append(entry)
 
-# Persist merged catalog for release notes.
+catalog.sort(key=lambda i: i.get("published_at") or i["tag"])
+
 with open("releases.json", "w", encoding="utf-8") as handle:
     json.dump(catalog, handle, ensure_ascii=False)
 
@@ -153,15 +187,14 @@ while True:
     for release in batch:
         tag_name = release.get("tag_name", "")
         if tag_name.startswith("launcher-"):
-            existing.add(tag_name.removeprefix("launcher-"))
+            existing.add(tag_name)
     page += 1
 
-new_items = [item for item in catalog if item["tag"] not in existing]
+new_items = [item for item in catalog if item["release_tag"] not in existing]
 build_items = catalog if mode == "all" else new_items
 has_new = len(build_items) > 0
 latest_tag = catalog[-1]["tag"] if catalog else ""
 
-# Flatten to one GHA job per (tag, type).
 flat = []
 for item in build_items:
     for rom_type in item["types"]:
@@ -173,6 +206,8 @@ for item in build_items:
             "launcher_repo": item["launcher_repo"],
             "type": rom_type,
             "types": item["types"],
+            "release_tag": item["release_tag"],
+            "y2_only": item["y2_only"],
         })
 
 release_matrix = [
@@ -180,18 +215,24 @@ release_matrix = [
         "tag": item["tag"],
         "name": item["name"],
         "types": item["types"],
-        "include_y2": "y2" in item["types"],
+        "release_tag": item["release_tag"],
+        "include_y2": item["include_y2"],
+        "y2_only": item["y2_only"],
+        "include_a": "a" in item["types"],
+        "include_b": "b" in item["types"],
     }
     for item in build_items
 ]
 
-print(f"Mode: {mode}")
+mode_label = "upstream(ismileblue)" if is_upstream else "fork(y2-separate)"
+print(f"Mode: {mode} ({mode_label})")
 print(f"ROM_REPO: {rom_repo}")
-print(f"Y1_LAUNCHER_REPO: {y1_repo} (tags < {y2_min} → types a,b)")
-print(f"Y2_LAUNCHER_REPO: {y2_repo} (tags >= {y2_min} → types a,b,y2)")
-print(f"Catalog tags: {[(i['tag'], i['types'], i['launcher_repo']) for i in catalog]}")
-print(f"Published ROM releases: {sorted(existing)}")
-print(f"Build jobs: {[(j['tag'], j['type']) for j in flat]}")
+print(f"Y1_LAUNCHER_REPO: {y1_repo}")
+print(f"Y2_LAUNCHER_REPO: {y2_repo}")
+print(f"Y2_MIN_VERSION: {y2_min}")
+print(f"Catalog: {[(i['tag'], i['types'], i['release_tag'], i['launcher_repo']) for i in catalog]}")
+print(f"Existing launcher-* releases: {sorted(existing)}")
+print(f"Build jobs: {[(j['tag'], j['type'], j['release_tag']) for j in flat]}")
 
 github_output = os.environ.get("GITHUB_OUTPUT")
 if github_output:
