@@ -4838,11 +4838,10 @@ public class MainActivity extends Activity {
             myVersionName = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
         } catch (Exception e) {
         }
-        // 🚀 1. 현재 기기의 비행기 모드 상태를 읽어옵니다. (젤리빈 4.2 기준 Global 세팅)
+        // 🚀 1. 현재 기기의 비행기 모드 상태를 읽어옵니다. (JB: System, KK/Y2: Global — both checked)
         boolean isAirplaneModeOn = false;
         try {
-            isAirplaneModeOn = Settings.Global.getInt(getContentResolver(),
-                    Settings.Global.AIRPLANE_MODE_ON, 0) != 0;
+            isAirplaneModeOn = com.themoon.y1.managers.FmRadioManager.getInstance(this).isAirplaneModeOn();
         } catch (Exception e) {
         }
         // 🚀 [디테일 수리] 화면에 보여줄 때만 ".json" 꼬리표를 빈칸("")으로 날려버립니다!
