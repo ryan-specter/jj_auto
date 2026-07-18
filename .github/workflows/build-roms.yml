@@ -19,10 +19,12 @@ permissions:
   contents: write
 
 env:
-  # Overridable via repo Actions variables (Settings → Secrets and variables → Actions → Variables).
-  ROM_REPO: ${{ vars.ROM_REPO || 'ryan-specter/jj_auto' }}
-  LAUNCHER_REPO: ${{ vars.LAUNCHER_REPO || 'ryan-specter/jj_auto' }}
-  MIN_LAUNCHER_VERSION: ${{ vars.MIN_LAUNCHER_VERSION || '0.11.2' }}
+  # Overridable via repo Actions variables.
+  ROM_REPO: ${{ vars.ROM_REPO || github.repository }}
+  Y1_LAUNCHER_REPO: ${{ vars.Y1_LAUNCHER_REPO || 'ismileblue/y1_launcher' }}
+  # Fork builds Y2-capable APKs from itself; upstream ismileblue builds from itself.
+  Y2_LAUNCHER_REPO: ${{ vars.Y2_LAUNCHER_REPO || github.repository }}
+  Y2_MIN_VERSION: ${{ vars.Y2_MIN_VERSION || '0.11.2' }}
   Y2_BASE_URL: ${{ vars.Y2_BASE_URL || 'https://github.com/ryan-specter/jj_auto/releases/download/y2-test/rom_y2.zip' }}
 
 jobs:
@@ -31,6 +33,7 @@ jobs:
     outputs:
       has_new: ${{ steps.prepare.outputs.has_new }}
       matrix: ${{ steps.prepare.outputs.matrix }}
+      release_matrix: ${{ steps.prepare.outputs.release_matrix }}
       latest_tag: ${{ steps.prepare.outputs.latest_tag }}
     steps:
       - uses: actions/checkout@v4
@@ -39,9 +42,11 @@ jobs:
         id: prepare
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
           ROM_REPO: ${{ env.ROM_REPO }}
-          LAUNCHER_REPO: ${{ env.LAUNCHER_REPO }}
-          MIN_LAUNCHER_VERSION: ${{ env.MIN_LAUNCHER_VERSION }}
+          Y1_LAUNCHER_REPO: ${{ env.Y1_LAUNCHER_REPO }}
+          Y2_LAUNCHER_REPO: ${{ env.Y2_LAUNCHER_REPO }}
+          Y2_MIN_VERSION: ${{ env.Y2_MIN_VERSION }}
         run: |
           MODE="new_only"
           if [ "${{ github.event_name }}" = "push" ]; then
@@ -50,8 +55,9 @@ jobs:
             MODE="all"
           fi
           echo "ROM_REPO=$ROM_REPO"
-          echo "LAUNCHER_REPO=$LAUNCHER_REPO"
-          echo "MIN_LAUNCHER_VERSION=$MIN_LAUNCHER_VERSION"
+          echo "Y1_LAUNCHER_REPO=$Y1_LAUNCHER_REPO"
+          echo "Y2_LAUNCHER_REPO=$Y2_LAUNCHER_REPO"
+          echo "Y2_MIN_VERSION=$Y2_MIN_VERSION"
           ./scripts/prepare-build-matrix.sh "$MODE"
 
       - name: Upload release metadata
@@ -69,9 +75,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        launcher: ${{ fromJson(needs.check-upstream.outputs.matrix) }}
-        # a/b = Y1 stock bases. y2 = Solar Y2 base, strip Solar, install JJ.
-        type: [a, b, y2]
+        # Flattened by prepare-build-matrix: one job per (tag, type).
+        # type=y2 only appears for tags >= Y2_MIN_VERSION.
+        include: ${{ fromJson(needs.check-upstream.outputs.matrix) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -85,9 +91,9 @@ jobs:
         env:
           Y2_BASE_URL: ${{ env.Y2_BASE_URL }}
         run: |
-          TAG="${{ matrix.launcher.tag }}"
+          TAG="${{ matrix.tag }}"
           TYPE="${{ matrix.type }}"
-          APK_URL="${{ matrix.launcher.apk_url }}"
+          APK_URL="${{ matrix.apk_url }}"
           OUT_DIR="$GITHUB_WORKSPACE/dist/${TAG}"
           mkdir -p "$OUT_DIR"
           case "$TYPE" in
@@ -96,14 +102,15 @@ jobs:
             y2)  OUT_FILE="$OUT_DIR/rom_y2.zip" ;;
             *)   echo "unknown type: $TYPE" >&2; exit 1 ;;
           esac
+          echo "Building $TAG type=$TYPE from ${{ matrix.launcher_repo }}"
           echo "Y2_BASE_URL=$Y2_BASE_URL"
           ./scripts/build-rom.sh "$TYPE" --launcher-tag "$TAG" --launcher-apk-url "$APK_URL" "$OUT_FILE"
 
       - name: Upload ROM artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rom-${{ matrix.launcher.tag }}-type-${{ matrix.type }}
-          path: dist/${{ matrix.launcher.tag }}/
+          name: rom-${{ matrix.tag }}-type-${{ matrix.type }}
+          path: dist/${{ matrix.tag }}/
           retention-days: 14
 
   release:
@@ -113,7 +120,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        launcher: ${{ fromJson(needs.check-upstream.outputs.matrix) }}
+        include: ${{ fromJson(needs.check-upstream.outputs.release_matrix) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -128,7 +135,7 @@ jobs:
         continue-on-error: true
         id: download_type_a
         with:
-          name: rom-${{ matrix.launcher.tag }}-type-a
+          name: rom-${{ matrix.tag }}-type-a
           path: dist/type-a
 
       - name: Download Type B ROM
@@ -136,47 +143,65 @@ jobs:
         continue-on-error: true
         id: download_type_b
         with:
-          name: rom-${{ matrix.launcher.tag }}-type-b
+          name: rom-${{ matrix.tag }}-type-b
           path: dist/type-b
 
       - name: Download Y2 ROM
+        if: ${{ matrix.include_y2 }}
         uses: actions/download-artifact@v4
         continue-on-error: true
         id: download_type_y2
         with:
-          name: rom-${{ matrix.launcher.tag }}-type-y2
+          name: rom-${{ matrix.tag }}-type-y2
           path: dist/type-y2
 
       - name: Verify ROM artifacts exist
         run: |
           test -f dist/type-a/rom.zip || {
-            echo "Skipping release for ${{ matrix.launcher.tag }}: Type A ROM artifact missing"
+            echo "Skipping release for ${{ matrix.tag }}: Type A ROM artifact missing"
             exit 1
           }
           test -f dist/type-b/rom_type_b.zip || {
-            echo "Skipping release for ${{ matrix.launcher.tag }}: Type B ROM artifact missing"
+            echo "Skipping release for ${{ matrix.tag }}: Type B ROM artifact missing"
             exit 1
           }
-          test -f dist/type-y2/rom_y2.zip || {
-            echo "Skipping release for ${{ matrix.launcher.tag }}: Y2 ROM artifact missing"
-            exit 1
-          }
+          if [ "${{ matrix.include_y2 }}" = "true" ]; then
+            test -f dist/type-y2/rom_y2.zip || {
+              echo "Skipping release for ${{ matrix.tag }}: Y2 ROM artifact missing"
+              exit 1
+            }
+          fi
 
       - name: Prepare release notes
         run: |
-          TAG="${{ matrix.launcher.tag }}"
+          TAG="${{ matrix.tag }}"
           ./scripts/format-release-notes.sh releases.json "$TAG" > RELEASE_NOTES.md
 
-      - name: Create GitHub release
+      - name: Create GitHub release (Y1 only)
+        if: ${{ !matrix.include_y2 }}
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: launcher-${{ matrix.launcher.tag }}
-          name: JJ Launcher ROM ${{ matrix.launcher.tag }}
+          tag_name: launcher-${{ matrix.tag }}
+          name: JJ Launcher ROM ${{ matrix.tag }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist/type-a/rom.zip
+            dist/type-b/rom_type_b.zip
+          fail_on_unmatched_files: true
+          make_latest: ${{ matrix.tag == needs.check-upstream.outputs.latest_tag }}
+          overwrite_files: true
+
+      - name: Create GitHub release (Y1 + Y2)
+        if: ${{ matrix.include_y2 }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: launcher-${{ matrix.tag }}
+          name: JJ Launcher ROM ${{ matrix.tag }}
           body_path: RELEASE_NOTES.md
           files: |
             dist/type-a/rom.zip
             dist/type-b/rom_type_b.zip
             dist/type-y2/rom_y2.zip
           fail_on_unmatched_files: true
-          make_latest: ${{ matrix.launcher.tag == needs.check-upstream.outputs.latest_tag }}
+          make_latest: ${{ matrix.tag == needs.check-upstream.outputs.latest_tag }}
           overwrite_files: true
